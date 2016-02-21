@@ -871,7 +871,8 @@ int wpa_driver_nl80211_capa(struct wpa_driver_nl80211_data *drv)
 	 * If poll command and tx status are supported, mac80211 is new enough
 	 * to have everything we need to not need monitor interfaces.
 	 */
-	drv->use_monitor = !info.poll_command_supported || !info.data_tx_status;
+	//drv->use_monitor = !info.poll_command_supported || !info.data_tx_status;
+	drv->use_monitor = 1;
 
 	if (drv->device_ap_sme && drv->use_monitor) {
 		/*
