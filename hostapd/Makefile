@@ -894,6 +894,8 @@ LIBS += -lsqlite3
 LIBS_h += -lsqlite3
 endif
 
+OBJS += ../src/wtp/aslan_wtp.o
+
 ALL=hostapd hostapd_cli
 
 all: verify_config $(ALL)

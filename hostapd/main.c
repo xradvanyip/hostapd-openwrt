@@ -27,6 +27,7 @@
 #include "config_file.h"
 #include "eap_register.h"
 #include "ctrl_iface.h"
+#include "wtp/aslan_wtp.h"
 
 
 struct hapd_global {
@@ -35,6 +36,8 @@ struct hapd_global {
 };
 
 static struct hapd_global global;
+
+wtp_handle_t *wtp_handle;
 
 
 #ifndef CONFIG_NO_HOSTAPD_LOGGER
@@ -533,6 +536,11 @@ static int gen_uuid(const char *txt_addr)
 #endif /* CONFIG_WPS */
 
 
+int aslan_msg_cb(aslan_msg_t* msg)
+{
+	// ...
+}
+
 int main(int argc, char *argv[])
 {
 	struct hapd_interfaces interfaces;
@@ -547,6 +555,15 @@ int main(int argc, char *argv[])
 #ifdef CONFIG_DEBUG_LINUX_TRACING
 	int enable_trace_dbg = 0;
 #endif /* CONFIG_DEBUG_LINUX_TRACING */
+
+	wtp_handle = wtp_alloc("br-lan", aslan_msg_cb);
+	if (!wtp_handle)
+	{
+		perror("WTP allocation failed");
+		return -1;
+	}
+
+	wtp_start_hello_thread(wtp_handle);
 
 	if (os_program_init())
 		return -1;
@@ -737,6 +754,8 @@ int main(int argc, char *argv[])
 	ret = 0;
 
  out:
+	close_wtp(wtp_handle);
+
 	hostapd_global_ctrl_iface_deinit(&interfaces);
 	/* Deinitialize all interfaces */
 	for (i = 0; i < interfaces.count; i++) {
