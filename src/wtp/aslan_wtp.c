@@ -229,11 +229,12 @@ void *hello_thread(void *arg)
 
     while (1)
 	{
+        sleep(handle->hello_interval_seconds);
         ret = wtp_send_hello_msg(handle);
-        if(ret == -1){
+        if(ret == -1)
+        {
             wpa_printf(MSG_ERROR, "ERROR: %s: wtp_send_hello_msg() failed\n", __FUNCTION__);
         }
-        sleep(handle->hello_interval_seconds);
     }
 
     pthread_exit(NULL);
