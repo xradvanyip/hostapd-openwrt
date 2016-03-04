@@ -133,7 +133,8 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
     }
 
     /* Check ARP cache */
-    if(handle->local_ip != handle->hds_ip){
+    if (handle->local_ip != handle->hds_ip)
+    {
         struct arpreq areq;
         memset(&areq, 0, sizeof(areq));
         struct sockaddr_in* sockaddr = NULL;
@@ -147,30 +148,20 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
         int i = 0;
         unsigned char mac_loopback[] = {0, 0, 0, 0, 0, 0};
 
-        while (((ret = ioctl(s, SIOCGARP, (caddr_t) &areq)) == -1) && (i < 5) && (mac_cmp(areq.arp_ha.sa_data, mac_loopback)))
+        ioctl(s, SIOCGARP, (caddr_t) &areq);
+        while ((i < 5) && (mac_cmp(areq.arp_ha.sa_data, mac_loopback)))
 		{
             i++;
             sleep(1);
-        }
-
-        if ((ret == -1) || mac_cmp(areq.arp_ha.sa_data, mac_loopback))
-		{
-            wpa_printf(MSG_ERROR, "ERROR: HDS MAC address obtaining failed\n");
-            pthread_cancel(handle->receive_thread);
-            pthread_mutex_destroy(&handle->udp_mutex);
-            close(handle->udp_socket);
-            errno = ENOENT;
-            free(handle);
-			return NULL;
+            ioctl(s, SIOCGARP, (caddr_t) &areq);
         }
 
         memcpy(handle->hds_mac, areq.arp_ha.sa_data, 6);
-		wpa_printf(MSG_INFO, "DEBUG: HDS MAC address found: "MACSTR"\n", MAC2STR(handle->hds_mac));
+
+        if (mac_cmp(areq.arp_ha.sa_data, mac_loopback)) wpa_printf(MSG_WARNING, "WARNING: HDS MAC address obtaining failed\n");
+        else wpa_printf(MSG_INFO, "INFO: HDS MAC address found: "MACSTR"\n", MAC2STR(handle->hds_mac));
     }
-	else
-	{
-        wpa_printf(MSG_INFO, "DEBUG: WTP started at loopback\n");
-    }
+    else wpa_printf(MSG_INFO, "INFO: WTP started at loopback\n");
 
     return handle;
 }
