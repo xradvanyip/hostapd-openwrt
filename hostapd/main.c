@@ -556,15 +556,6 @@ int main(int argc, char *argv[])
 	int enable_trace_dbg = 0;
 #endif /* CONFIG_DEBUG_LINUX_TRACING */
 
-	wtp_handle = wtp_alloc("br-lan", aslan_msg_cb);
-	if (!wtp_handle)
-	{
-		perror("WTP allocation failed");
-		return -1;
-	}
-
-	wtp_start_hello_thread(wtp_handle);
-
 	if (os_program_init())
 		return -1;
 
@@ -745,6 +736,15 @@ int main(int argc, char *argv[])
 	}
 
 	hostapd_global_ctrl_iface_init(&interfaces);
+
+	wtp_handle = wtp_alloc("br-lan", aslan_msg_cb);
+	if (!wtp_handle)
+	{
+		perror("WTP allocation failed");
+		return -1;
+	}
+
+	wtp_start_hello_thread(wtp_handle);
 
 	if (hostapd_global_run(&interfaces, daemonize, pid_file)) {
 		wpa_printf(MSG_ERROR, "Failed to start eloop");
