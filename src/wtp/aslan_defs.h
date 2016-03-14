@@ -40,6 +40,64 @@
 typedef struct aslan_hello_t_ {
 } aslan_hello_t;
 
+/* ASLAN Context Request */
+typedef struct aslan_ctx_req_t_ {
+	unsigned char MAC[6];
+} aslan_ctx_req_t;
+
+/* ASLAN Association Response */
+typedef struct aslan_assoc_resp_t_ {
+	unsigned char MAC[6];
+	void* sta_wtp_ctx;
+	uint16_t sta_wtp_ctx_length;
+} aslan_assoc_resp_t;
+
+/* ASLAN Disassociation Response */
+typedef struct aslan_disassoc_resp_t_ {
+	unsigned char MAC[6];
+} aslan_disassoc_resp_t;
+
+/* ASLAN Signal Response */
+typedef struct aslan_sig_resp_t_ {
+	unsigned char MAC[6];
+	uint8_t RSSI;
+} aslan_sig_resp_t;
+
+/* ASLAN Initialisation Response */
+typedef struct aslan_init_resp_t_ {
+	uint8_t channel_num;
+	uint8_t* SSID;
+	uint8_t ssid_length;
+} aslan_init_resp_t;
+
+/* ASLAN Context Response */
+typedef struct aslan_ctx_resp_t_ {
+	unsigned char MAC[6];
+	unsigned char BSSID[6];
+} aslan_ctx_resp_t;
+
+/* ASLAN Handover Request */
+typedef struct aslan_hand_req_t_ {
+	unsigned char MAC[6];
+	unsigned char BSSID[6];
+	void* sta_wtp_ctx;
+	uint16_t sta_wtp_ctx_length;
+} aslan_hand_req_t;
+
+/* ASLAN Release Request */
+typedef struct aslan_rel_req_t_ {
+	unsigned char MAC[6];
+} aslan_rel_req_t;
+
+/* ASLAN Flush Request */
+typedef struct aslan_flush_req_t_ {
+} aslan_flush_req_t;
+
+/* ASLAN Acknowledgement */
+typedef struct aslan_ack_t_ {
+	uint8_t flag;
+} aslan_ack_t;
+
 /* ASLAN abstract message */
 typedef struct aslan_msg_t_ {
     in_addr_t sender_ip;
@@ -47,7 +105,16 @@ typedef struct aslan_msg_t_ {
     uint8_t msg_id;
     union {
         aslan_hello_t *hello;
-        // ...
+		aslan_ctx_req_t *ctx_req;
+		aslan_assoc_resp_t *assoc_resp;
+		aslan_disassoc_resp_t *disassoc_resp;
+		aslan_sig_resp_t *sig_resp;
+		aslan_init_resp_t *init_resp;
+		aslan_ctx_resp_t *ctx_resp;
+		aslan_hand_req_t *hand_req;
+		aslan_rel_req_t *rel_req;
+		aslan_flush_req_t *flush_req;
+		aslan_ack_t *ack;
     } msg;
 } aslan_msg_t;
 

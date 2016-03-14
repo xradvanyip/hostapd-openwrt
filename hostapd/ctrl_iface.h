@@ -9,6 +9,7 @@
 #ifndef CTRL_IFACE_H
 #define CTRL_IFACE_H
 
+int hostapd_ctrl_iface_chan_switch(struct hostapd_iface *iface, char *pos);
 #ifndef CONFIG_NO_CTRL_IFACE
 int hostapd_ctrl_iface_init(struct hostapd_data *hapd);
 void hostapd_ctrl_iface_deinit(struct hostapd_data *hapd);

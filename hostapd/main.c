@@ -37,7 +37,9 @@ struct hapd_global {
 
 static struct hapd_global global;
 
+const char* const chan_freq[] = { "2407", "2412", "2417", "2422", "2427", "2432", "2437", "2442", "2447", "2452", "2457", "2462", "2467", "2472", "2484" };
 wtp_handle_t *wtp_handle;
+struct hostapd_iface *wtp_hapdif = NULL;
 
 
 #ifndef CONFIG_NO_HOSTAPD_LOGGER
@@ -538,7 +540,27 @@ static int gen_uuid(const char *txt_addr)
 
 int aslan_msg_cb(aslan_msg_t* msg)
 {
-	// ...
+	struct hostapd_data *hapd_main = wtp_hapdif->bss[0];
+	char *chansw_arg;
+
+	switch (msg->msg_id)
+	{
+		case MSG_ID_INIT_RESP:
+			chansw_arg = os_malloc(7);
+			os_snprintf(chansw_arg, 7, "0 %s", chan_freq[msg->msg.init_resp->channel_num]);
+
+			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ssid", msg->msg.init_resp->SSID);
+			hostapd_reload_iface(hapd_main->iface);
+			sleep(1);
+			hostapd_ctrl_iface_chan_switch(hapd_main->iface, chansw_arg);
+			sleep(1);
+			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ieee80211n", "1");
+			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ignore_broadcast_ssid", "0");
+
+			wtp_send_ack(wtp_handle, 0);
+			os_free(chansw_arg);
+			break;
+	}
 }
 
 int main(int argc, char *argv[])
@@ -737,6 +759,7 @@ int main(int argc, char *argv[])
 
 	hostapd_global_ctrl_iface_init(&interfaces);
 
+	wtp_hapdif = interfaces.iface[0];
 	wtp_handle = wtp_alloc("br-lan", aslan_msg_cb);
 	if (!wtp_handle)
 	{

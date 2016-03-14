@@ -49,6 +49,7 @@ int wtp_start_hello_thread(wtp_handle_t* handle);
 int wtp_stop_hello_thread(wtp_handle_t* handle);
 
 int wtp_send_hello_msg(wtp_handle_t* handle);
+int wtp_send_ack(wtp_handle_t* handle, uint8_t flag);
 
 inline int mac_cmp(char mac1[6], char mac2[6]);
 

@@ -3,6 +3,7 @@
 #include <sys/socket.h>
 #include <netinet/udp.h>
 #include <net/if_arp.h>
+#include <linux/if_ether.h>
 #include <linux/sockios.h>
 #include <arpa/inet.h>
 #include <assert.h>
@@ -10,6 +11,7 @@
 
 #include "includes.h"
 #include "common.h"
+#include "crc32.h"
 #include "aslan_wtp.h"
 
 static void *receive_msg_thread(void *arg);
@@ -110,8 +112,7 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
 	wpa_printf(MSG_INFO, "INFO: UDP socket for ASLAN messages created, listening on port: %d\n", handle->local_port);
 
     /* start receiving thread for ASLAN messages */
-    ret = pthread_create(&(handle->receive_thread), NULL,
-                         receive_msg_thread, (void*)handle);
+    ret = pthread_create(&(handle->receive_thread), NULL, receive_msg_thread, (void*)handle);
     if (ret != 0)
 	{
         errno = ENOMEM;
@@ -210,13 +211,192 @@ int close_wtp(wtp_handle_t* handle) {
 	return 0;
 }
 
+int parse_msg(unsigned char *buf, int length, aslan_msg_t *msg)
+{
+	msg->msg_id = buf[0];
+
+	switch (msg->msg_id)
+	{
+		case MSG_ID_INIT_RESP:
+			msg->msg.init_resp = calloc(1, sizeof(aslan_init_resp_t));
+			if (!msg->msg.init_resp) return -1;
+			if (length < MSG_LENGTH_INIT_RESP) return 1;
+			msg->msg.init_resp->channel_num = buf[1];
+			msg->msg.init_resp->SSID = calloc(15, sizeof(uint8_t));
+			if (!msg->msg.init_resp->SSID) return -1;
+			strncpy(msg->msg.init_resp->SSID, buf + 2, 15);
+			msg->msg.init_resp->ssid_length = strlen(msg->msg.init_resp->SSID);
+			if (msg->msg.init_resp->ssid_length > 14) msg->msg.init_resp->ssid_length = 14;
+			break;
+
+		case MSG_ID_CTX_RESP:
+			msg->msg.ctx_resp = calloc(1, sizeof(aslan_ctx_resp_t));
+			if (!msg->msg.ctx_resp) return -1;
+			if (length < MSG_LENGTH_CTX_RESP) return 1;
+			memcpy(msg->msg.ctx_resp->MAC, buf + 1, 6);
+			memcpy(msg->msg.ctx_resp->BSSID, buf + 7, 6);
+			break;
+
+		case MSG_ID_HAND_REQ:
+			msg->msg.hand_req = calloc(1, sizeof(aslan_hand_req_t));
+			if (!msg->msg.hand_req) return -1;
+			if (length < MSG_LENGTH_HAND_REQ) return 1;
+			memcpy(msg->msg.hand_req->MAC, buf + 1, 6);
+			memcpy(msg->msg.hand_req->BSSID, buf + 7, 6);
+			msg->msg.hand_req->sta_wtp_ctx_length = ntohs(*((uint16_t*)(buf + 13)));
+			msg->msg.hand_req->sta_wtp_ctx = calloc(msg->msg.hand_req->sta_wtp_ctx_length, 1);
+			if (!msg->msg.hand_req->sta_wtp_ctx) return -1;
+			memcpy(msg->msg.hand_req->sta_wtp_ctx, buf + 15, msg->msg.hand_req->sta_wtp_ctx_length);
+			break;
+
+		case MSG_ID_REL_REQ:
+			msg->msg.rel_req = calloc(1, sizeof(aslan_rel_req_t));
+			if (!msg->msg.rel_req) return -1;
+			if (length < MSG_LENGTH_REL_REQ) return 1;
+			memcpy(msg->msg.rel_req->MAC, buf + 1, 6);
+			break;
+
+		case MSG_ID_FLUSH_REQ:
+			msg->msg.flush_req = calloc(1, sizeof(aslan_flush_req_t));
+			if (!msg->msg.flush_req) return -1;
+			if (length < MSG_LENGTH_FLUSH_REQ) return 1;
+			break;
+
+		case MSG_ID_ACK:
+			msg->msg.ack = calloc(1, sizeof(aslan_ack_t));
+			if (!msg->msg.ack) return -1;
+			if (length < MSG_LENGTH_ACK) return 1;
+			msg->msg.ack->flag = buf[1];
+			break;
+
+		default:
+			return 1;
+	}
+
+	return 0;
+}
+
+void free_msg(aslan_msg_t **msg)
+{
+	if (!(*msg)) return;
+
+	switch ((*msg)->msg_id)
+	{
+		case MSG_ID_HELLO:
+			free((*msg)->msg.hello);
+			break;
+		case MSG_ID_CTX_REQ:
+			free((*msg)->msg.ctx_req);
+			break;
+		case MSG_ID_ASSOC_RESP:
+			free((*msg)->msg.assoc_resp->sta_wtp_ctx);
+			free((*msg)->msg.assoc_resp);
+			break;
+		case MSG_ID_DISASSOC_RESP:
+			free((*msg)->msg.disassoc_resp);
+			break;
+		case MSG_ID_SIG_RESP:
+			free((*msg)->msg.sig_resp);
+			break;
+		case MSG_ID_INIT_RESP:
+			free((*msg)->msg.init_resp->SSID);
+			free((*msg)->msg.init_resp);
+			break;
+		case MSG_ID_CTX_RESP:
+			free((*msg)->msg.ctx_resp);
+			break;
+		case MSG_ID_HAND_REQ:
+			free((*msg)->msg.hand_req->sta_wtp_ctx);
+			free((*msg)->msg.hand_req);
+			break;
+		case MSG_ID_REL_REQ:
+			free((*msg)->msg.rel_req);
+			break;
+		case MSG_ID_FLUSH_REQ:
+			free((*msg)->msg.flush_req);
+			break;
+		case MSG_ID_ACK:
+			free((*msg)->msg.ack);
+			break;
+	}
+	free(*msg);
+	(*msg) = NULL;
+}
+
 void *receive_msg_thread(void *arg)
 {
 	assert(arg);
 	wtp_handle_t* handle = (wtp_handle_t *) arg;
-	
-	// ...
-	
+	int ret;
+	struct sockaddr_in addr_sender = {0};
+    addr_sender.sin_family = AF_INET;
+    aslan_msg_t *msg = NULL;
+	u32 msg_crc, prev_msg_crc = 0;
+	unsigned char buf[ETH_DATA_LEN];
+	int length = sizeof(addr_sender);
+
+	while (1)
+	{
+		ret = recvfrom(handle->udp_socket, buf, ETH_DATA_LEN, 0, (struct sockaddr *) &addr_sender, (socklen_t*) &length);
+
+		if (ret == -1)
+		{
+			perror("Receive ASLAN message error");
+			continue;
+		}
+
+		msg = calloc(1, sizeof(aslan_msg_t));
+		if (!msg)
+		{
+			errno = ENOMEM;
+			perror("ASLAN message parse error");
+			continue;
+		}
+
+		msg->sender_ip = ntohl(addr_sender.sin_addr.s_addr);
+		msg->sender_port = ntohs(addr_sender.sin_port);
+
+		ret = parse_msg(buf,ret,msg);
+		if (ret == -1)
+		{
+			errno = ENOMEM;
+			perror("ASLAN message parse error");
+			free_msg(&msg);
+			continue;
+		}
+		else if (ret == 1)
+		{
+			wpa_printf(MSG_ERROR, "ERROR: Received unexpected/invalid ASLAN message! Id: %d\n", buf[0]);
+			free_msg(&msg);
+			continue;
+		}
+
+		if (msg->sender_ip != handle->hds_ip)
+		{
+			wpa_printf(MSG_ERROR, "ERROR: Unexpected HDS IP address: %s\n", inet_ntoa(*(struct in_addr *) &msg->sender_ip));
+			free_msg(&msg);
+			continue;
+		}
+
+		if (msg->sender_port != handle->hds_port)
+		{
+			wpa_printf(MSG_ERROR, "ERROR: Unexpected HDS port: %u\n", msg->sender_port);
+			free_msg(&msg);
+			continue;
+		}
+
+		msg_crc = crc32((u8*) buf, ret);
+		if ((prev_msg_crc) && (prev_msg_crc == msg_crc))
+		{
+			free_msg(&msg);
+			continue;
+		}
+		prev_msg_crc = msg_crc;
+
+		(handle->msg_cb)(msg);
+		free_msg(&msg);
+	}
+
 	pthread_exit(NULL);
     return NULL;
 }
@@ -373,6 +553,22 @@ int wtp_send_hello_msg(wtp_handle_t* handle)
 	
 	if (udp_unlock(handle) != 0) return -1;
 	
+	return ret;
+}
+
+int wtp_send_ack(wtp_handle_t* handle, uint8_t flag)
+{
+	int ret;
+    uint8_t msg[MSG_LENGTH_ACK];
+
+	if (udp_lock(handle) != 0) return -1;
+
+	msg[0] = MSG_ID_ACK;
+	msg[1] = flag;
+    ret = sendto(handle->udp_socket, msg, MSG_LENGTH_ACK, 0, (struct sockaddr *) &handle->hds_inet_addr, sizeof(handle->hds_inet_addr));
+
+	if (udp_unlock(handle) != 0) return -1;
+
 	return ret;
 }
 

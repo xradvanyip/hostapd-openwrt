@@ -1749,7 +1749,7 @@ static int hostapd_ctrl_get_alloc_fail(struct hostapd_data *hapd,
 #endif /* CONFIG_TESTING_OPTIONS */
 
 
-static int hostapd_ctrl_iface_chan_switch(struct hostapd_iface *iface,
+int hostapd_ctrl_iface_chan_switch(struct hostapd_iface *iface,
 					  char *pos)
 {
 #ifdef NEED_AP_MLME
