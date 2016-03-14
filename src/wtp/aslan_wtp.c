@@ -221,6 +221,7 @@ int parse_msg(unsigned char *buf, int length, aslan_msg_t *msg)
 			msg->msg.init_resp = calloc(1, sizeof(aslan_init_resp_t));
 			if (!msg->msg.init_resp) return -1;
 			if (length < MSG_LENGTH_INIT_RESP) return 1;
+			if ((buf[1] < 1) || (buf[1] > 13)) return 1;
 			msg->msg.init_resp->channel_num = buf[1];
 			msg->msg.init_resp->SSID = calloc(15, sizeof(uint8_t));
 			if (!msg->msg.init_resp->SSID) return -1;
