@@ -327,19 +327,18 @@ void *receive_msg_thread(void *arg)
 {
 	assert(arg);
 	wtp_handle_t* handle = (wtp_handle_t *) arg;
-	int ret;
 	struct sockaddr_in addr_sender = {0};
-    addr_sender.sin_family = AF_INET;
-    aslan_msg_t *msg = NULL;
+	addr_sender.sin_family = AF_INET;
+	aslan_msg_t *msg = NULL;
 	u32 msg_crc, prev_msg_crc = 0;
 	unsigned char buf[ETH_DATA_LEN];
-	int length = sizeof(addr_sender);
+	int ret, buf_length, ip_length = sizeof(addr_sender);
 
 	while (1)
 	{
-		ret = recvfrom(handle->udp_socket, buf, ETH_DATA_LEN, 0, (struct sockaddr *) &addr_sender, (socklen_t*) &length);
+		buf_length = recvfrom(handle->udp_socket, buf, ETH_DATA_LEN, 0, (struct sockaddr *) &addr_sender, (socklen_t*) &ip_length);
 
-		if (ret == -1)
+		if (buf_length == -1)
 		{
 			perror("Receive ASLAN message error");
 			continue;
@@ -356,7 +355,7 @@ void *receive_msg_thread(void *arg)
 		msg->sender_ip = ntohl(addr_sender.sin_addr.s_addr);
 		msg->sender_port = ntohs(addr_sender.sin_port);
 
-		ret = parse_msg(buf,ret,msg);
+		ret = parse_msg(buf,buf_length,msg);
 		if (ret == -1)
 		{
 			errno = ENOMEM;
@@ -385,7 +384,7 @@ void *receive_msg_thread(void *arg)
 			continue;
 		}
 
-		msg_crc = crc32((u8*) buf, ret);
+		msg_crc = crc32((u8*) buf, buf_length);
 		if ((prev_msg_crc) && (prev_msg_crc == msg_crc))
 		{
 			free_msg(&msg);
