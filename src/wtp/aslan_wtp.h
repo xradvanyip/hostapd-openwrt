@@ -6,6 +6,7 @@
 #include <stdbool.h>
 
 #include "aslan_defs.h"
+#include "pipe.h"
 
 /*
  * Typedef
@@ -17,6 +18,12 @@ typedef struct wtp_handle_t_ {
     char device[IFNAMSIZ];
 
     pthread_t receive_thread;
+    pthread_t process_thread;
+
+    pipe_producer_t* msg_recv_producer;
+    pipe_producer_t* msg_send_producer;
+    pipe_consumer_t* msg_recv_consumer;
+    pipe_consumer_t* msg_send_consumer;
 
     pthread_mutex_t hello_mutex;
     bool hello_thread_running;

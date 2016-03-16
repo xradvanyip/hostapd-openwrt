@@ -895,6 +895,7 @@ LIBS_h += -lsqlite3
 endif
 
 OBJS += ../src/wtp/crc32.o
+OBJS += ../src/wtp/pipe.o
 OBJS += ../src/wtp/aslan_wtp.o
 
 ALL=hostapd hostapd_cli
