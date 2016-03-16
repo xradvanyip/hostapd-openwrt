@@ -546,15 +546,14 @@ int aslan_msg_cb(aslan_msg_t* msg)
 	switch (msg->msg_id)
 	{
 		case MSG_ID_INIT_RESP:
-			chansw_arg = os_malloc(7);
-			os_snprintf(chansw_arg, 7, "0 %s", chan_freq[msg->msg.init_resp->channel_num]);
+			chansw_arg = os_malloc(10);
+			os_snprintf(chansw_arg, 10, "0 %s ht", chan_freq[msg->msg.init_resp->channel_num]);
 
 			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ssid", msg->msg.init_resp->SSID);
 			hostapd_reload_iface(hapd_main->iface);
 			sleep(1);
 			hostapd_ctrl_iface_chan_switch(hapd_main->iface, chansw_arg);
 			sleep(1);
-			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ieee80211n", "1");
 			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ignore_broadcast_ssid", "0");
 
 			wtp_send_ack(wtp_handle, 0);
