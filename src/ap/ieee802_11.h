@@ -16,6 +16,7 @@ struct hostapd_frame_info;
 struct ieee80211_ht_capabilities;
 struct ieee80211_mgmt;
 
+void wtp_sta_set_reject(int hash_code);
 int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 		    struct hostapd_frame_info *fi);
 void ieee802_11_mgmt_cb(struct hostapd_data *hapd, const u8 *buf, size_t len,

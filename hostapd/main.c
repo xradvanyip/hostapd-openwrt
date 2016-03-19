@@ -28,6 +28,9 @@
 #include "eap_register.h"
 #include "ctrl_iface.h"
 #include "wtp/aslan_wtp.h"
+#include "ap/ieee802_11.h"
+#include "ap/sta_info.h"
+#include "ap/ap_drv_ops.h"
 
 
 struct hapd_global {
@@ -40,6 +43,8 @@ static struct hapd_global global;
 const char* const chan_freq[] = { "2407", "2412", "2417", "2422", "2427", "2432", "2437", "2442", "2447", "2452", "2457", "2462", "2467", "2472", "2484" };
 wtp_handle_t *wtp_handle;
 struct hostapd_iface *wtp_hapdif = NULL;
+char wtp_hashtable[256][10];
+int wtp_hashcount[256] = {0};
 
 
 #ifndef CONFIG_NO_HOSTAPD_LOGGER
@@ -556,6 +561,7 @@ int aslan_msg_cb(aslan_msg_t* msg)
 			sleep(1);
 			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ignore_broadcast_ssid", "0");
 
+			wtp_set_state(wtp_handle, WTP_STATE_INITIALISED);
 			wtp_send_ack(wtp_handle, 0);
 			os_free(chansw_arg);
 			break;
@@ -776,7 +782,7 @@ int main(int argc, char *argv[])
 	ret = 0;
 
  out:
-	close_wtp(wtp_handle);
+	//close_wtp(wtp_handle);
 
 	hostapd_global_ctrl_iface_deinit(&interfaces);
 	/* Deinitialize all interfaces */

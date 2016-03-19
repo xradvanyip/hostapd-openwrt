@@ -5,6 +5,11 @@
 #include <netinet/in.h>
 
 #define ASLAN_PROTOCOL_PORT    0x2016  //decimal: 8214
+#define WAIT_FOR_ACK_INTERVAL  2
+
+/* WTP states */
+#define WTP_STATE_NONE         0
+#define WTP_STATE_INITIALISED  1
 
 /* ASLAN message definitions */
 #define MSG_ID_HELLO         0
@@ -103,6 +108,7 @@ typedef struct aslan_msg_t_ {
     in_addr_t sender_ip;
     in_port_t sender_port;
     uint8_t msg_id;
+	uint8_t msg_length;
     union {
         aslan_hello_t *hello;
 		aslan_ctx_req_t *ctx_req;

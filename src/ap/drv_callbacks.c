@@ -770,7 +770,7 @@ static void hostapd_rx_from_unknown_sta(struct hostapd_data *hapd,
 	if (hapd == NULL || hapd == HAPD_BROADCAST)
 		return;
 
-	ieee802_11_rx_from_unknown(hapd, addr, wds);
+	//ieee802_11_rx_from_unknown(hapd, addr, wds);
 }
 
 

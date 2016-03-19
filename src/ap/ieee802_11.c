@@ -40,7 +40,13 @@
 #include "wnm_ap.h"
 #include "ieee802_11.h"
 #include "dfs.h"
+#include "wtp/aslan_wtp.h"
 
+
+extern wtp_handle_t *wtp_handle;
+extern struct hostapd_iface *wtp_hapdif;
+extern char wtp_hashtable[256][10];
+extern int wtp_hashcount[];
 
 u8 * hostapd_eid_supp_rates(struct hostapd_data *hapd, u8 *eid)
 {
@@ -2181,6 +2187,33 @@ static int handle_action(struct hostapd_data *hapd,
 	return 1;
 }
 
+void wtp_sta_set_reject(int hash_code)
+{
+	struct wtp_sta *hash_sta;
+
+	wtp_state_mutex_lock(wtp_handle);
+	hash_sta = (struct wtp_sta *) wtp_hashtable[hash_code];
+	hash_sta->mode = WTP_STA_MODE_REJECTED;
+	wtp_state_mutex_unlock(wtp_handle);
+}
+
+static int wtp_sta_get_mode(struct wtp_sta *sta)
+{
+	int sta_mode;
+
+	wtp_state_mutex_lock(wtp_handle);
+	sta_mode = sta->mode;
+	wtp_state_mutex_unlock(wtp_handle);
+
+	return sta_mode;
+}
+
+static void wtp_sta_set_mode(struct wtp_sta *sta, int sta_mode)
+{
+	wtp_state_mutex_lock(wtp_handle);
+	sta->mode = sta_mode;
+	wtp_state_mutex_unlock(wtp_handle);
+}
 
 /**
  * ieee802_11_mgmt - process incoming IEEE 802.11 management frames
@@ -2200,7 +2233,10 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 {
 	struct ieee80211_mgmt *mgmt;
 	int broadcast;
-	u16 fc, stype;
+	u16 fc, stype, type;
+	struct sta_info *sta = NULL;
+	struct wtp_sta *hash_sta = NULL;
+	int hash_code, hash_sta_mode;
 	int ret = 0;
 
 	if (len < 24)
@@ -2235,9 +2271,60 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 	}
 
 
-	if (stype == WLAN_FC_STYPE_PROBE_REQ) {
+	/* if (stype == WLAN_FC_STYPE_PROBE_REQ) {
 		handle_probe_req(hapd, mgmt, len, fi->ssi_signal);
 		return 1;
+	} */
+
+	type = WLAN_FC_GET_TYPE(fc);
+
+	if (wtp_get_state(wtp_handle) == WTP_STATE_NONE) return 1;
+
+	sta = ap_get_sta(hapd, mgmt->sa);
+
+	/* stations hash check */
+	if (type == WLAN_FC_TYPE_MGMT)
+	{
+		//...send stats...
+		hash_code = mgmt->sa[5];
+		if (wtp_hashcount[mgmt->sa[5]] == 0)
+		{
+			hash_sta = os_zalloc(sizeof(struct wtp_sta));
+			if (!hash_sta)
+			{
+				wpa_printf(MSG_INFO, "malloc failed");
+				return 0;
+			}
+			wtp_sta_set_mode(hash_sta, WTP_STA_MODE_NONE);
+			os_memcpy(hash_sta->wtp_addr, mgmt->sa, ETH_ALEN);
+			os_memset(hash_sta->wtp_bssid, 0, ETH_ALEN);
+			wpa_printf(MSG_INFO, "H-INIT: " MACSTR " - %d, %d", MAC2STR(hash_sta->wtp_addr), hash_code, wtp_hashcount[hash_code]);
+			os_memcpy(wtp_hashtable[hash_code] + wtp_hashcount[hash_code] * sizeof(struct wtp_sta), hash_sta, sizeof(struct wtp_sta));
+			++wtp_hashcount[hash_code];
+			os_free(hash_sta);
+		}
+		hash_sta = (struct wtp_sta *) wtp_hashtable[mgmt->sa[5]];
+		if (stype == WLAN_FC_STYPE_PROBE_REQ)
+		{
+			hash_sta_mode = wtp_sta_get_mode(hash_sta);
+			switch (hash_sta_mode)
+			{
+				case WTP_STA_MODE_REJECTED:
+					break;
+				case WTP_STA_MODE_NONE:
+					wtp_send_ctx_req(wtp_handle, (unsigned char *) mgmt->sa);
+					wtp_sta_set_mode(hash_sta, WTP_STA_MODE_REQ);
+					break;
+				case WTP_STA_MODE_CTX:
+				case WTP_STA_MODE_CONNECTED:
+					if (os_memcmp(hapd->own_addr, hash_sta->wtp_bssid, ETH_ALEN) == 0) handle_probe_req(hapd, mgmt, len, fi->ssi_signal);
+					break;
+			}
+			return 1;
+		}
+
+		/* filter for mgmt frame sent to other devices */
+		if (os_memcmp(hapd->own_addr, hash_sta->wtp_bssid, ETH_ALEN) != 0) return 1;
 	}
 
 	if (os_memcmp(mgmt->da, hapd->own_addr, ETH_ALEN) != 0) {
@@ -2248,6 +2335,17 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 		return 0;
 	}
 
+	if ((stype == WLAN_FC_STYPE_ASSOC_REQ) || (stype == WLAN_FC_STYPE_REASSOC_REQ) || (stype == WLAN_FC_STYPE_AUTH))
+	{
+		if (!sta) return 0;
+		hash_sta_mode = wtp_sta_get_mode(hash_sta);
+		if(((hash_sta_mode == WTP_STA_MODE_CTX) || (hash_sta_mode == WTP_STA_MODE_CONNECTED)) && (os_memcmp(mgmt->bssid, hash_sta->wtp_bssid, ETH_ALEN) != 0))
+		{
+			wpa_printf(MSG_INFO, "--- BSSID COMMUNICATION DEPRECATED ---");
+			return 1;
+		}
+	}
+
 	switch (stype) {
 	case WLAN_FC_STYPE_AUTH:
 		wpa_printf(MSG_DEBUG, "mgmt::auth");
@@ -2256,21 +2354,25 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 		break;
 	case WLAN_FC_STYPE_ASSOC_REQ:
 		wpa_printf(MSG_DEBUG, "mgmt::assoc_req");
+		wtp_sta_set_mode(hash_sta, WTP_STA_MODE_CONNECTED);
 		handle_assoc(hapd, mgmt, len, 0);
 		ret = 1;
 		break;
 	case WLAN_FC_STYPE_REASSOC_REQ:
 		wpa_printf(MSG_DEBUG, "mgmt::reassoc_req");
+		wtp_sta_set_mode(hash_sta, WTP_STA_MODE_CONNECTED);
 		handle_assoc(hapd, mgmt, len, 1);
 		ret = 1;
 		break;
 	case WLAN_FC_STYPE_DISASSOC:
 		wpa_printf(MSG_DEBUG, "mgmt::disassoc");
+		wtp_sta_set_mode(hash_sta, WTP_STA_MODE_NONE);
 		handle_disassoc(hapd, mgmt, len);
 		ret = 1;
 		break;
 	case WLAN_FC_STYPE_DEAUTH:
 		wpa_msg(hapd->msg_ctx, MSG_DEBUG, "mgmt::deauth");
+		wtp_sta_set_mode(hash_sta, WTP_STA_MODE_NONE);
 		handle_deauth(hapd, mgmt, len);
 		ret = 1;
 		break;
