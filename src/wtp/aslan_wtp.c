@@ -54,29 +54,26 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
     }
     handle->udp_socket = s;
 
-	ret = pthread_mutex_init(&handle->state_mutex, NULL);
-    if (ret != 0)
-	{
-        close(handle->udp_socket);
+	if (pthread_mutex_init(&handle->hello_mutex, NULL) != 0)
+    {
         free(handle);
 		return NULL;
     }
 
-    ret = pthread_mutex_init(&handle->udp_mutex, NULL);
-    if (ret != 0)
-	{
-		pthread_mutex_destroy(&handle->state_mutex);
-        close(handle->udp_socket);
+	if (pthread_mutex_init(&handle->state_mutex, NULL) != 0)
+    {
         free(handle);
 		return NULL;
     }
 
-	ret = pthread_mutex_init(&handle->ack_mutex, NULL);
-    if (ret != 0)
-	{
-        pthread_mutex_destroy(&handle->udp_mutex);
-		pthread_mutex_destroy(&handle->state_mutex);
-		close(handle->udp_socket);
+    if (pthread_mutex_init(&handle->udp_mutex, NULL) != 0)
+    {
+		free(handle);
+		return NULL;
+    }
+
+	if (pthread_mutex_init(&handle->ack_mutex, NULL) != 0)
+    {
         free(handle);
 		return NULL;
     }
@@ -86,11 +83,7 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
     if (!inet_aton(hds_ip, (struct in_addr*) &(handle->hds_inet_addr.sin_addr.s_addr)))
 	{
         errno = EINVAL;
-		pthread_mutex_destroy(&handle->ack_mutex);
-        pthread_mutex_destroy(&handle->udp_mutex);
-		pthread_mutex_destroy(&handle->state_mutex);
-        close(handle->udp_socket);
-        free(handle);
+		close_wtp(handle);
 		return NULL;
     }
     handle->hds_ip = ntohl(handle->hds_inet_addr.sin_addr.s_addr);
@@ -104,11 +97,7 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
     strncpy(ifr.ifr_name, device, IFNAMSIZ - 1);
     if (ioctl(handle->udp_socket, SIOCGIFADDR, &ifr) == -1)
 	{
-		pthread_mutex_destroy(&handle->ack_mutex);
-        pthread_mutex_destroy(&handle->udp_mutex);
-		pthread_mutex_destroy(&handle->state_mutex);
-        close(handle->udp_socket);
-        free(handle);
+		close_wtp(handle);
 		return NULL;
     }
     handle->local_ip = ntohl(((struct sockaddr_in*)&ifr.ifr_addr)->sin_addr.s_addr);
@@ -130,11 +119,7 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
     socklen_t len = sizeof(sin);
     if (getsockname(handle->udp_socket, (struct sockaddr*)&sin, &len) == -1)
 	{
-		pthread_mutex_destroy(&handle->ack_mutex);
-        pthread_mutex_destroy(&handle->udp_mutex);
-		pthread_mutex_destroy(&handle->state_mutex);
-        close(handle->udp_socket);
-        free(handle);
+		close_wtp(handle);
 		return NULL;
     }
     handle->local_port = ntohs(sin.sin_port);
@@ -152,46 +137,28 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
 	pipe_free(send_pipe);
 
     /* start receiving thread for ASLAN messages */
-    ret = pthread_create(&(handle->receive_thread), NULL, receive_msg_thread, (void*)handle);
-    if (ret != 0)
-	{
+    if (pthread_create(&(handle->receive_thread), NULL, receive_msg_thread, (void*)handle) != 0)
+    {
         errno = ENOMEM;
-		pthread_mutex_destroy(&handle->ack_mutex);
-        pthread_mutex_destroy(&handle->udp_mutex);
-		pthread_mutex_destroy(&handle->state_mutex);
-        close(handle->udp_socket);
-        free(handle);
+		close_wtp(handle);
 		return NULL;
     }
 	wpa_printf(MSG_INFO, "DEBUG: receiving thread for ASLAN messages created\n");
 
 	/* start processing thread for ASLAN messages */
-    ret = pthread_create(&(handle->process_thread), NULL, process_msg_thread, (void*)handle);
-    if (ret != 0)
-	{
+    if (pthread_create(&(handle->process_thread), NULL, process_msg_thread, (void*)handle) != 0)
+    {
         errno = ENOMEM;
-		pthread_cancel(handle->receive_thread);
-		pthread_mutex_destroy(&handle->ack_mutex);
-        pthread_mutex_destroy(&handle->udp_mutex);
-		pthread_mutex_destroy(&handle->state_mutex);
-        close(handle->udp_socket);
-        free(handle);
+		close_wtp(handle);
 		return NULL;
     }
 	wpa_printf(MSG_INFO, "DEBUG: processing thread for ASLAN messages created\n");
 
 	/* start sending thread for ASLAN messages */
-    ret = pthread_create(&(handle->send_thread), NULL, send_msg_thread, (void*)handle);
-    if (ret != 0)
-	{
+    if (pthread_create(&(handle->send_thread), NULL, send_msg_thread, (void*)handle) != 0)
+    {
         errno = ENOMEM;
-		pthread_cancel(handle->process_thread);
-		pthread_cancel(handle->receive_thread);
-		pthread_mutex_destroy(&handle->ack_mutex);
-        pthread_mutex_destroy(&handle->udp_mutex);
-		pthread_mutex_destroy(&handle->state_mutex);
-        close(handle->udp_socket);
-        free(handle);
+		close_wtp(handle);
 		return NULL;
     }
 	wpa_printf(MSG_INFO, "DEBUG: sending thread for ASLAN messages created\n");
@@ -199,14 +166,7 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
     /* obtain HDS MAC address by a Hello message */
     if (wtp_send_hello_msg(handle) == -1)
 	{
-		pthread_cancel(handle->send_thread);
-		pthread_cancel(handle->process_thread);
-        pthread_cancel(handle->receive_thread);
-		pthread_mutex_destroy(&handle->ack_mutex);
-        pthread_mutex_destroy(&handle->udp_mutex);
-		pthread_mutex_destroy(&handle->state_mutex);
-        close(handle->udp_socket);
-        free(handle);
+		close_wtp(handle);
 		return NULL;
     }
 
@@ -244,85 +204,24 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
     return handle;
 }
 
-int close_wtp(wtp_handle_t* handle) {
+void close_wtp(wtp_handle_t* handle) {
     if (!handle)
 	{
         errno = EINVAL;
-        return -1;
+        return;
     }
 
-    int ret = -1;
+	wtp_stop_hello_thread(handle);
+	if (handle->receive_thread) pthread_cancel(handle->receive_thread);
+	if (handle->msg_send_producer) pipe_producer_free(handle->msg_send_producer);
+	if (handle->msg_send_consumer) pipe_consumer_free(handle->msg_send_consumer);
+	if (handle->msg_recv_producer) pipe_producer_free(handle->msg_recv_producer);
+	if (handle->msg_recv_consumer) pipe_consumer_free(handle->msg_recv_consumer);
+	if (handle->send_thread) pthread_cancel(handle->send_thread);
+	if (handle->process_thread) pthread_cancel(handle->process_thread);
+	if (handle->udp_socket) close(handle->udp_socket);
 
-    ret = pthread_mutex_destroy(&handle->udp_mutex);
-    if (ret != 0){
-        errno = ret;
-		pthread_cancel(handle->send_thread);
-		pthread_cancel(handle->process_thread);
-        pthread_cancel(handle->receive_thread);
-		pthread_mutex_destroy(&handle->ack_mutex);
-        wtp_stop_hello_thread(handle);
-        close(handle->udp_socket);
-        return -1;
-    }
-
-	ret = pthread_cancel(handle->send_thread);
-    if (ret != 0)
-	{
-        errno = EAGAIN;
-		pthread_cancel(handle->process_thread);
-		pthread_cancel(handle->receive_thread);
-		pthread_mutex_destroy(&handle->ack_mutex);
-        wtp_stop_hello_thread(handle);
-        close(handle->udp_socket);
-        return -1;
-    }
-
-	ret = pthread_cancel(handle->process_thread);
-    if (ret != 0)
-	{
-        errno = EAGAIN;
-		pthread_cancel(handle->receive_thread);
-		pthread_mutex_destroy(&handle->ack_mutex);
-        wtp_stop_hello_thread(handle);
-        close(handle->udp_socket);
-        return -1;
-    }
-
-    ret = pthread_cancel(handle->receive_thread);
-    if (ret != 0)
-	{
-        errno = EAGAIN;
-		pthread_mutex_destroy(&handle->ack_mutex);
-        wtp_stop_hello_thread(handle);
-        close(handle->udp_socket);
-        return -1;
-    }
-
-	pthread_mutex_destroy(&handle->ack_mutex);
-
-	pipe_producer_free(handle->msg_recv_producer);
-	pipe_consumer_free(handle->msg_recv_consumer);
-
-    ret = close(handle->udp_socket);
-    if (ret == -1)
-	{
-        wtp_stop_hello_thread(handle);
-        return -1;
-    }
-
-    ret = wtp_stop_hello_thread(handle);
-    if (ret != 0)
-	{
-        return -1;
-    }
-
-	pipe_producer_free(handle->msg_send_producer);
-	pipe_consumer_free(handle->msg_send_consumer);
-
-	pthread_mutex_destroy(&handle->state_mutex);
-
-    free(handle);
-	return 0;
+	free(handle);
 }
 
 int wtp_get_state(wtp_handle_t* handle)

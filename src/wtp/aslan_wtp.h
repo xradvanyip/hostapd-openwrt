@@ -58,7 +58,7 @@ typedef struct wtp_handle_t_ {
  */
  
 wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb);
-int close_wtp(wtp_handle_t* handle);
+void close_wtp(wtp_handle_t* handle);
 
 int wtp_get_state(wtp_handle_t* handle);
 void wtp_set_state(wtp_handle_t* handle, int state);

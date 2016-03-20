@@ -782,7 +782,7 @@ int main(int argc, char *argv[])
 	ret = 0;
 
  out:
-	//close_wtp(wtp_handle);
+	close_wtp(wtp_handle);
 
 	hostapd_global_ctrl_iface_deinit(&interfaces);
 	/* Deinitialize all interfaces */
