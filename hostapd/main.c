@@ -559,11 +559,11 @@ int aslan_msg_cb(aslan_msg_t* msg)
 			os_snprintf(arg_buf, 10, "0 %s ht", chan_freq[msg->msg.init_resp->channel_num]);
 
 			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ssid", msg->msg.init_resp->SSID);
+			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ignore_broadcast_ssid", "0");
 			hostapd_reload_iface(hapd_main->iface);
 			sleep(1);
 			hostapd_ctrl_iface_chan_switch(hapd_main->iface, arg_buf);
 			sleep(1);
-			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ignore_broadcast_ssid", "0");
 
 			wtp_set_state(wtp_handle, WTP_STATE_INITIALISED);
 			wtp_send_ack(wtp_handle, 0);
