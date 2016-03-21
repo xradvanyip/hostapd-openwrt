@@ -6,6 +6,7 @@
 
 #define ASLAN_PROTOCOL_PORT    0x2016  //decimal: 8214
 #define WAIT_FOR_ACK_INTERVAL  2
+#define BSS_CONF_FILE          "/tmp/aslan-bss.conf"
 
 /* WTP states */
 #define WTP_STATE_NONE         0

@@ -2197,6 +2197,18 @@ void wtp_sta_set_reject(int hash_code)
 	wtp_state_mutex_unlock(wtp_handle);
 }
 
+void wtp_sta_set_ctx(int hash_code, int id, u8 *BSSID)
+{
+	struct wtp_sta *hash_sta;
+
+	wtp_state_mutex_lock(wtp_handle);
+	hash_sta = (struct wtp_sta *) wtp_hashtable[hash_code];
+	hash_sta->bss_id = id;
+	os_memcpy(hash_sta->wtp_bssid, BSSID, ETH_ALEN);
+	hash_sta->mode = WTP_STA_MODE_CTX;
+	wtp_state_mutex_unlock(wtp_handle);
+}
+
 static int wtp_sta_get_mode(struct wtp_sta *sta)
 {
 	int sta_mode;

@@ -53,6 +53,7 @@
 
 struct wtp_sta {
 	int mode;
+	int bss_id;
 	u8 wtp_addr[6];
 	u8 wtp_bssid[6];
 };
