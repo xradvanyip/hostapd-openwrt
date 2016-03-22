@@ -601,25 +601,27 @@ int aslan_msg_cb(aslan_msg_t* msg)
 				fprintf(bss_conf, "bridge=%s\n", hapd_main->conf->bridge);
 				fprintf(bss_conf, "bssid="MACSTR"\n", MAC2STR(msg->msg.ctx_resp->BSSID));
 				fclose(bss_conf);
-				ret = hostapd_add_iface(wtp_hapdif->interfaces, arg_buf);
+				hostapd_add_iface(wtp_hapdif->interfaces, arg_buf);
 				sleep(1);
-				if (ret != -1)
+				os_free(arg_buf);
+
+				wtp_used_bss[i] = 1;
+
+				for (j=0; j < wtp_hapdif->num_bss; j++)
 				{
-					wtp_used_bss[i] = 1;
+					if (hostapd_mac_comp(wtp_hapdif->bss[j]->conf->bssid, msg->msg.ctx_resp->BSSID) == 0) break;
+				}
 
-					for (j=0; j < wtp_hapdif->num_bss; j++)
+				if (j != 0)
+				{
+					sta = ap_sta_add(wtp_hapdif->bss[j], msg->msg.ctx_resp->MAC);
+					wtp_sta_set_ctx(msg->msg.ctx_resp->MAC[5], i, msg->msg.ctx_resp->BSSID);
+					if (sta)
 					{
-						if (hostapd_mac_comp(wtp_hapdif->bss[j]->conf->bssid, msg->msg.ctx_resp->BSSID) == 0) break;
-					}
-
-					if (j != 0)
-					{
-						sta = ap_sta_add(wtp_hapdif->bss[j], msg->msg.ctx_resp->MAC);
-						wtp_sta_set_ctx(msg->msg.ctx_resp->MAC[5], i, msg->msg.ctx_resp->BSSID);
-						if (sta) wpa_printf(MSG_INFO, "Added STA "MACSTR" with BSS struct id: %d\n", MAC2STR(sta->addr), j);
+						wpa_printf(MSG_INFO, "Added STA "MACSTR" with BSS struct id: %d\n", MAC2STR(sta->addr), j);
+						ret = 0;
 					}
 				}
-				os_free(arg_buf);
 			}
 			if (ret != -1) wtp_send_ack(wtp_handle, 0);
 			else wtp_send_ack(wtp_handle, 1);
