@@ -12,6 +12,13 @@
 #define WTP_STATE_NONE         0
 #define WTP_STATE_INITIALISED  1
 
+/* STA states */
+#define WTP_STA_MODE_NONE (0)
+#define WTP_STA_MODE_REQ (1)
+#define WTP_STA_MODE_CTX (2)
+#define WTP_STA_MODE_REJECTED (3)
+#define WTP_STA_MODE_CONNECTED (4)
+
 /* ASLAN message definitions */
 #define MSG_ID_HELLO         0
 #define MSG_ID_CTX_REQ       1

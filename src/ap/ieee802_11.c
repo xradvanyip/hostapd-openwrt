@@ -40,13 +40,8 @@
 #include "wnm_ap.h"
 #include "ieee802_11.h"
 #include "dfs.h"
-#include "wtp/aslan_wtp.h"
+#include "wtp/wtp_core.h"
 
-
-extern wtp_handle_t *wtp_handle;
-extern struct hostapd_iface *wtp_hapdif;
-extern char wtp_hashtable[256][10];
-extern int wtp_hashcount[];
 
 u8 * hostapd_eid_supp_rates(struct hostapd_data *hapd, u8 *eid)
 {
@@ -2187,45 +2182,6 @@ static int handle_action(struct hostapd_data *hapd,
 	return 1;
 }
 
-void wtp_sta_set_reject(int hash_code)
-{
-	struct wtp_sta *hash_sta;
-
-	wtp_state_mutex_lock(wtp_handle);
-	hash_sta = (struct wtp_sta *) wtp_hashtable[hash_code];
-	hash_sta->mode = WTP_STA_MODE_REJECTED;
-	wtp_state_mutex_unlock(wtp_handle);
-}
-
-void wtp_sta_set_ctx(int hash_code, int id, u8 *BSSID)
-{
-	struct wtp_sta *hash_sta;
-
-	wtp_state_mutex_lock(wtp_handle);
-	hash_sta = (struct wtp_sta *) wtp_hashtable[hash_code];
-	hash_sta->bss_id = id;
-	os_memcpy(hash_sta->wtp_bssid, BSSID, ETH_ALEN);
-	hash_sta->mode = WTP_STA_MODE_CTX;
-	wtp_state_mutex_unlock(wtp_handle);
-}
-
-static int wtp_sta_get_mode(struct wtp_sta *sta)
-{
-	int sta_mode;
-
-	wtp_state_mutex_lock(wtp_handle);
-	sta_mode = sta->mode;
-	wtp_state_mutex_unlock(wtp_handle);
-
-	return sta_mode;
-}
-
-static void wtp_sta_set_mode(struct wtp_sta *sta, int sta_mode)
-{
-	wtp_state_mutex_lock(wtp_handle);
-	sta->mode = sta_mode;
-	wtp_state_mutex_unlock(wtp_handle);
-}
 
 /**
  * ieee802_11_mgmt - process incoming IEEE 802.11 management frames
@@ -2247,6 +2203,7 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 	int broadcast;
 	u16 fc, stype;
 	struct wtp_sta *hash_sta = NULL;
+	wtp_handle_t *wtp_handle;
 	int hash_code, hash_sta_mode;
 	int ret = 0;
 
@@ -2287,27 +2244,29 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 		return 1;
 	} */
 
+	wtp_handle = wtp_get_handle();
+	if (!wtp_handle) return 1;
 	if (wtp_get_state(wtp_handle) == WTP_STATE_NONE) return 1;
 
 	//...send stats...
 	hash_code = mgmt->sa[5];
-	if (wtp_hashcount[mgmt->sa[5]] == 0)
+	if (wtp_handle->wtp_hashcount[mgmt->sa[5]] == 0)
 	{
-		hash_sta = os_zalloc(sizeof(struct wtp_sta));
+		hash_sta = os_calloc(1, sizeof(struct wtp_sta));
 		if (!hash_sta)
 		{
-			wpa_printf(MSG_INFO, "malloc failed");
+			wpa_printf(MSG_INFO, "calloc failed");
 			return 0;
 		}
 		wtp_sta_set_mode(hash_sta, WTP_STA_MODE_NONE);
 		os_memcpy(hash_sta->wtp_addr, mgmt->sa, ETH_ALEN);
 		os_memset(hash_sta->wtp_bssid, 0, ETH_ALEN);
-		wpa_printf(MSG_INFO, "H-INIT: " MACSTR " - %d, %d", MAC2STR(hash_sta->wtp_addr), hash_code, wtp_hashcount[hash_code]);
-		os_memcpy(wtp_hashtable[hash_code] + wtp_hashcount[hash_code] * sizeof(struct wtp_sta), hash_sta, sizeof(struct wtp_sta));
-		++wtp_hashcount[hash_code];
+		wpa_printf(MSG_INFO, "H-INIT: " MACSTR " - %d, %d", MAC2STR(hash_sta->wtp_addr), hash_code, wtp_handle->wtp_hashcount[hash_code]);
+		os_memcpy(wtp_handle->wtp_hashtable[hash_code] + wtp_handle->wtp_hashcount[hash_code] * sizeof(struct wtp_sta), hash_sta, sizeof(struct wtp_sta));
+		wtp_handle->wtp_hashcount[hash_code]++;
 		os_free(hash_sta);
 	}
-	hash_sta = (struct wtp_sta *) wtp_hashtable[mgmt->sa[5]];
+	hash_sta = (struct wtp_sta *) wtp_handle->wtp_hashtable[mgmt->sa[5]];
 	if (stype == WLAN_FC_STYPE_PROBE_REQ)
 	{
 		hash_sta_mode = wtp_sta_get_mode(hash_sta);
@@ -2324,6 +2283,8 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 		}
 		return 1;
 	}
+
+	if (os_memcmp(hapd->own_addr, hash_sta->wtp_bssid, ETH_ALEN) != 0) return 1;
 
 	if (os_memcmp(mgmt->da, hapd->own_addr, ETH_ALEN) != 0) {
 		hostapd_logger(hapd, mgmt->sa, HOSTAPD_MODULE_IEEE80211,

@@ -78,6 +78,12 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
 		return NULL;
     }
 
+	if (pthread_mutex_init(&handle->sta_mutex, NULL) != 0)
+    {
+        free(handle);
+		return NULL;
+    }
+
     /* HDS parameters */
     handle->hds_inet_addr.sin_family = AF_INET;
     if (!inet_aton(hds_ip, (struct in_addr*) &(handle->hds_inet_addr.sin_addr.s_addr)))
@@ -239,16 +245,6 @@ void wtp_set_state(wtp_handle_t* handle, int state)
 {
 	pthread_mutex_lock(&handle->state_mutex);
 	handle->wtp_state = state;
-	pthread_mutex_unlock(&handle->state_mutex);
-}
-
-void wtp_state_mutex_lock(wtp_handle_t* handle)
-{
-	pthread_mutex_lock(&handle->state_mutex);
-}
-
-void wtp_state_mutex_unlock(wtp_handle_t* handle)
-{
 	pthread_mutex_unlock(&handle->state_mutex);
 }
 

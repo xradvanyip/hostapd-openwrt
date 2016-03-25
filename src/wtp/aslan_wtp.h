@@ -49,6 +49,10 @@ typedef struct wtp_handle_t_ {
     uint16_t hds_port;
     struct sockaddr_in hds_inet_addr;
 
+    pthread_mutex_t sta_mutex;
+    char wtp_hashtable[256][10];
+    int wtp_hashcount[256];
+
     wtp_aslan_msg_cb msg_cb;
 } wtp_handle_t;
 
@@ -62,8 +66,6 @@ void close_wtp(wtp_handle_t* handle);
 
 int wtp_get_state(wtp_handle_t* handle);
 void wtp_set_state(wtp_handle_t* handle, int state);
-void wtp_state_mutex_lock(wtp_handle_t* handle);
-void wtp_state_mutex_unlock(wtp_handle_t* handle);
 
 int wtp_start_hello_thread(wtp_handle_t* handle);
 int wtp_stop_hello_thread(wtp_handle_t* handle);

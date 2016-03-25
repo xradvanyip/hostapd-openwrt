@@ -44,19 +44,6 @@
  * Supported Rates IEs). */
 #define WLAN_SUPP_RATES_MAX 32
 
-#define WTP_STA_MODE_NONE (0)
-#define WTP_STA_MODE_REQ (1)
-#define WTP_STA_MODE_CTX (2)
-#define WTP_STA_MODE_REJECTED (3)
-#define WTP_STA_MODE_CONNECTED (4)
-
-
-struct wtp_sta {
-	int mode;
-	int bss_id;
-	u8 wtp_addr[6];
-	u8 wtp_bssid[6];
-};
 
 struct sta_info {
 	struct sta_info *next; /* next entry in sta list */

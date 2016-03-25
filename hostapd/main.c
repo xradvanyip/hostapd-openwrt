@@ -27,10 +27,7 @@
 #include "config_file.h"
 #include "eap_register.h"
 #include "ctrl_iface.h"
-#include "wtp/aslan_wtp.h"
-#include "ap/ieee802_11.h"
-#include "ap/sta_info.h"
-#include "ap/ap_drv_ops.h"
+#include "wtp/wtp_core.h"
 
 
 struct hapd_global {
@@ -39,13 +36,6 @@ struct hapd_global {
 };
 
 static struct hapd_global global;
-
-const char* const chan_freq[] = { "2407", "2412", "2417", "2422", "2427", "2432", "2437", "2442", "2447", "2452", "2457", "2462", "2467", "2472", "2484" };
-wtp_handle_t *wtp_handle;
-struct hostapd_iface *wtp_hapdif = NULL;
-char wtp_hashtable[256][10];
-int wtp_hashcount[256] = {0};
-int wtp_used_bss[100] = {0};
 
 
 #ifndef CONFIG_NO_HOSTAPD_LOGGER
@@ -544,91 +534,6 @@ static int gen_uuid(const char *txt_addr)
 #endif /* CONFIG_WPS */
 
 
-int aslan_msg_cb(aslan_msg_t* msg)
-{
-	struct hostapd_data *hapd_main = wtp_hapdif->bss[0];
-	struct sta_info *sta = NULL;
-	char *arg_buf;
-	int i, j, ret;
-	FILE *bss_conf;
-
-	switch (msg->msg_id)
-	{
-		case MSG_ID_INIT_RESP:
-			arg_buf = os_malloc(10);
-			os_snprintf(arg_buf, 10, "0 %s ht", chan_freq[msg->msg.init_resp->channel_num]);
-
-			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ssid", msg->msg.init_resp->SSID);
-			hostapd_set_iface(hapd_main->iconf, hapd_main->conf, "ignore_broadcast_ssid", "0");
-			hostapd_reload_iface(hapd_main->iface);
-			sleep(1);
-			hostapd_ctrl_iface_chan_switch(hapd_main->iface, arg_buf);
-			sleep(1);
-
-			wtp_set_state(wtp_handle, WTP_STATE_INITIALISED);
-			wtp_send_ack(wtp_handle, 0);
-			os_free(arg_buf);
-			break;
-
-		case MSG_ID_CTX_RESP:
-			arg_buf = os_malloc(50);
-			bss_conf = fopen(BSS_CONF_FILE, "w");
-			ret = -1;
-			if ((arg_buf) && (bss_conf))
-			{
-				os_snprintf(arg_buf, 50, "bss_config=%s:%s", wtp_hapdif->phy, BSS_CONF_FILE);
-				for (i=1; i < 100; i++) if (wtp_used_bss[i] == 0) break;
-
-				fprintf(bss_conf, "driver=nl80211\n");
-				fprintf(bss_conf, "logger_syslog=%d\n", hapd_main->conf->logger_syslog);
-				fprintf(bss_conf, "logger_syslog_level=%d\n", hapd_main->conf->logger_syslog_level);
-				fprintf(bss_conf, "logger_stdout=%d\n", hapd_main->conf->logger_stdout);
-				fprintf(bss_conf, "logger_stdout_level=%d\n", hapd_main->conf->logger_stdout_level);
-				fprintf(bss_conf, "country_code=%s\n", hapd_main->iconf->country);
-				fprintf(bss_conf, "ieee80211d=%d\n", hapd_main->iconf->ieee80211d);
-				fprintf(bss_conf, "hw_mode=g\n");
-				fprintf(bss_conf, "channel=%d\n", hapd_main->iconf->channel);
-				fprintf(bss_conf, "ieee80211n=%d\n", hapd_main->iconf->ieee80211n);
-				fprintf(bss_conf, "interface=%s-%d\n", hapd_main->conf->iface, i);
-				fprintf(bss_conf, "ctrl_interface=%s\n", hapd_main->conf->ctrl_interface);
-				fprintf(bss_conf, "disassoc_low_ack=%d\n", hapd_main->conf->disassoc_low_ack);
-				fprintf(bss_conf, "preamble=%d\n", hapd_main->iconf->preamble);
-				fprintf(bss_conf, "wmm_enabled=%d\n", hapd_main->conf->wmm_enabled);
-				fprintf(bss_conf, "uapsd_advertisement_enabled=%d\n", hapd_main->conf->wmm_uapsd);
-				fprintf(bss_conf, "auth_algs=%d\n", hapd_main->conf->auth_algs);
-				fprintf(bss_conf, "wpa=%d\n", hapd_main->conf->wpa);
-				fprintf(bss_conf, "ssid=%.*s\n", hapd_main->conf->ssid.ssid_len, hapd_main->conf->ssid.ssid);
-				fprintf(bss_conf, "bridge=%s\n", hapd_main->conf->bridge);
-				fprintf(bss_conf, "bssid="MACSTR"\n", MAC2STR(msg->msg.ctx_resp->BSSID));
-				fclose(bss_conf);
-				hostapd_add_iface(wtp_hapdif->interfaces, arg_buf);
-				sleep(1);
-				os_free(arg_buf);
-
-				wtp_used_bss[i] = 1;
-
-				for (j=0; j < wtp_hapdif->num_bss; j++)
-				{
-					if (hostapd_mac_comp(wtp_hapdif->bss[j]->conf->bssid, msg->msg.ctx_resp->BSSID) == 0) break;
-				}
-
-				if (j != 0)
-				{
-					sta = ap_sta_add(wtp_hapdif->bss[j], msg->msg.ctx_resp->MAC);
-					wtp_sta_set_ctx(msg->msg.ctx_resp->MAC[5], i, msg->msg.ctx_resp->BSSID);
-					if (sta)
-					{
-						wpa_printf(MSG_INFO, "Added STA "MACSTR" with BSS struct id: %d\n", MAC2STR(sta->addr), j);
-						ret = 0;
-					}
-				}
-			}
-			if (ret != -1) wtp_send_ack(wtp_handle, 0);
-			else wtp_send_ack(wtp_handle, 1);
-			break;
-	}
-}
-
 int main(int argc, char *argv[])
 {
 	struct hapd_interfaces interfaces;
@@ -643,6 +548,7 @@ int main(int argc, char *argv[])
 #ifdef CONFIG_DEBUG_LINUX_TRACING
 	int enable_trace_dbg = 0;
 #endif /* CONFIG_DEBUG_LINUX_TRACING */
+	wtp_handle_t *wtp_handle;
 
 	if (os_program_init())
 		return -1;
@@ -825,15 +731,13 @@ int main(int argc, char *argv[])
 
 	hostapd_global_ctrl_iface_init(&interfaces);
 
-	wtp_hapdif = interfaces.iface[0];
 	wtp_handle = wtp_alloc("br-lan", aslan_msg_cb);
 	if (!wtp_handle)
 	{
 		perror("WTP allocation failed");
 		return -1;
 	}
-
-	wtp_start_hello_thread(wtp_handle);
+	wtp_init(wtp_handle, interfaces.iface[0]);
 
 	if (hostapd_global_run(&interfaces, daemonize, pid_file)) {
 		wpa_printf(MSG_ERROR, "Failed to start eloop");
