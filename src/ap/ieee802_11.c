@@ -2202,9 +2202,9 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 	struct ieee80211_mgmt *mgmt;
 	int broadcast;
 	u16 fc, stype;
-	struct wtp_sta *hash_sta = NULL;
+	struct wtp_sta *hash_sta;
 	wtp_handle_t *wtp_handle;
-	int hash_code, hash_sta_mode;
+	int hash_sta_mode;
 	int ret = 0;
 
 	if (len < 24)
@@ -2249,24 +2249,7 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 	if (wtp_get_state(wtp_handle) == WTP_STATE_NONE) return 1;
 
 	//...send stats...
-	hash_code = mgmt->sa[5];
-	if (wtp_handle->wtp_hashcount[mgmt->sa[5]] == 0)
-	{
-		hash_sta = os_calloc(1, sizeof(struct wtp_sta));
-		if (!hash_sta)
-		{
-			wpa_printf(MSG_INFO, "calloc failed");
-			return 0;
-		}
-		wtp_sta_set_mode(hash_sta, WTP_STA_MODE_NONE);
-		os_memcpy(hash_sta->wtp_addr, mgmt->sa, ETH_ALEN);
-		os_memset(hash_sta->wtp_bssid, 0, ETH_ALEN);
-		wpa_printf(MSG_INFO, "H-INIT: " MACSTR " - %d, %d", MAC2STR(hash_sta->wtp_addr), hash_code, wtp_handle->wtp_hashcount[hash_code]);
-		os_memcpy(wtp_handle->wtp_hashtable[hash_code] + wtp_handle->wtp_hashcount[hash_code] * sizeof(struct wtp_sta), hash_sta, sizeof(struct wtp_sta));
-		wtp_handle->wtp_hashcount[hash_code]++;
-		os_free(hash_sta);
-	}
-	hash_sta = (struct wtp_sta *) wtp_handle->wtp_hashtable[mgmt->sa[5]];
+	hash_sta = wtp_sta_get(mgmt->sa);
 	if (stype == WLAN_FC_STYPE_PROBE_REQ)
 	{
 		hash_sta_mode = wtp_sta_get_mode(hash_sta);
@@ -2278,13 +2261,13 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 				break;
 			case WTP_STA_MODE_CTX:
 			case WTP_STA_MODE_CONNECTED:
-				if (os_memcmp(hapd->own_addr, hash_sta->wtp_bssid, ETH_ALEN) == 0) handle_probe_req(hapd, mgmt, len, fi->ssi_signal);
+				if (wtp_sta_bssid_cmp(hash_sta, hapd->own_addr) == 0) handle_probe_req(hapd, mgmt, len, fi->ssi_signal);
 				break;
 		}
 		return 1;
 	}
 
-	if (os_memcmp(hapd->own_addr, hash_sta->wtp_bssid, ETH_ALEN) != 0) return 1;
+	if (wtp_sta_bssid_cmp(hash_sta, hapd->own_addr) != 0) return 1;
 
 	if (os_memcmp(mgmt->da, hapd->own_addr, ETH_ALEN) != 0) {
 		hostapd_logger(hapd, mgmt->sa, HOSTAPD_MODULE_IEEE80211,

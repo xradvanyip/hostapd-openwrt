@@ -896,6 +896,7 @@ endif
 
 OBJS += ../src/wtp/crc32.o
 OBJS += ../src/wtp/pipe.o
+OBJS += ../src/wtp/hashmap.o
 OBJS += ../src/wtp/wtp_core.o
 OBJS += ../src/wtp/aslan_wtp.o
 

@@ -18,8 +18,8 @@ void wtp_init(wtp_handle_t *handle, struct hostapd_iface *hapdif)
 	wtp_handle = handle;
 	wtp_hapdif = hapdif;
 
-	memset(handle->wtp_hashcount, 0, 256);
-	wtp_start_hello_thread(wtp_handle);
+	handle->wtp_sta_hashmap = hashmapCreate(0);
+	wtp_start_hello_thread(handle);
 }
 
 wtp_handle_t* wtp_get_handle()
@@ -27,25 +27,48 @@ wtp_handle_t* wtp_get_handle()
 	return wtp_handle;
 }
 
-void wtp_sta_set_reject(int hash_code)
+struct wtp_sta* wtp_sta_get(u8* sta_mac)
 {
 	struct wtp_sta *hash_sta;
 
 	pthread_mutex_lock(&wtp_handle->sta_mutex);
-	hash_sta = (struct wtp_sta *) wtp_handle->wtp_hashtable[hash_code];
-	hash_sta->mode = WTP_STA_MODE_REJECTED;
+	hash_sta = (struct wtp_sta *) hashmapGet(wtp_handle->wtp_sta_hashmap, *((unsigned long *) sta_mac));
+	if (!hash_sta)
+	{
+		hash_sta = os_calloc(1, sizeof(struct wtp_sta));
+		hash_sta->mode = WTP_STA_MODE_NONE;
+		os_memcpy(hash_sta->wtp_addr, sta_mac, ETH_ALEN);
+		os_memset(hash_sta->wtp_bssid, 0, ETH_ALEN);
+		wpa_printf(MSG_INFO, "New STA in range: "MACSTR, MAC2STR(hash_sta->wtp_addr));
+		hashmapInsert(wtp_handle->wtp_sta_hashmap, hash_sta, *((unsigned long *) sta_mac));
+	}
+	pthread_mutex_unlock(&wtp_handle->sta_mutex);
+
+	return hash_sta;
+}
+
+void wtp_sta_set_reject(u8* sta_mac)
+{
+	struct wtp_sta *hash_sta;
+
+	pthread_mutex_lock(&wtp_handle->sta_mutex);
+	hash_sta = (struct wtp_sta *) hashmapGet(wtp_handle->wtp_sta_hashmap, *((unsigned long *) sta_mac));
+	if (hash_sta) hash_sta->mode = WTP_STA_MODE_REJECTED;
 	pthread_mutex_unlock(&wtp_handle->sta_mutex);
 }
 
-void wtp_sta_set_ctx(int hash_code, int id, u8 *BSSID)
+void wtp_sta_set_ctx(u8* sta_mac, u8 *BSSID, int id)
 {
 	struct wtp_sta *hash_sta;
 
 	pthread_mutex_lock(&wtp_handle->sta_mutex);
-	hash_sta = (struct wtp_sta *) wtp_handle->wtp_hashtable[hash_code];
-	hash_sta->bss_id = id;
-	os_memcpy(hash_sta->wtp_bssid, BSSID, ETH_ALEN);
-	hash_sta->mode = WTP_STA_MODE_CTX;
+	hash_sta = (struct wtp_sta *) hashmapGet(wtp_handle->wtp_sta_hashmap, *((unsigned long *) sta_mac));
+	if (hash_sta)
+	{
+		hash_sta->bss_id = id;
+		os_memcpy(hash_sta->wtp_bssid, BSSID, ETH_ALEN);
+		hash_sta->mode = WTP_STA_MODE_CTX;
+	}
 	pthread_mutex_unlock(&wtp_handle->sta_mutex);
 }
 
@@ -65,6 +88,17 @@ void wtp_sta_set_mode(struct wtp_sta *sta, int sta_mode)
 	pthread_mutex_lock(&wtp_handle->sta_mutex);
 	sta->mode = sta_mode;
 	pthread_mutex_unlock(&wtp_handle->sta_mutex);
+}
+
+int wtp_sta_bssid_cmp(struct wtp_sta *sta, u8* mac)
+{
+	int ret;
+
+	pthread_mutex_lock(&wtp_handle->sta_mutex);
+	ret = os_memcmp(mac, sta->wtp_bssid, ETH_ALEN);
+	pthread_mutex_unlock(&wtp_handle->sta_mutex);
+
+	return ret;
 }
 
 static void wtp_ap_init(struct hostapd_data *hapd, u8 channel_num, char *SSID)
@@ -157,7 +191,7 @@ int aslan_msg_cb(aslan_msg_t* msg)
 			ret = wtp_vif_create(wtp_hapdif, msg->msg.ctx_resp->BSSID, msg->msg.ctx_resp->MAC);
 			if (ret != -1)
 			{
-				wtp_sta_set_ctx(msg->msg.ctx_resp->MAC[5], ret, msg->msg.ctx_resp->BSSID);
+				wtp_sta_set_ctx(msg->msg.ctx_resp->MAC, msg->msg.ctx_resp->BSSID, ret);
 				wtp_send_ack(wtp_handle, 0);
 			}
 			else wtp_send_ack(wtp_handle, 1);

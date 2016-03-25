@@ -13,6 +13,7 @@
 #include "common.h"
 #include "crc32.h"
 #include "ap/ieee802_11.h"
+#include "wtp_core.h"
 #include "aslan_wtp.h"
 
 static void *receive_msg_thread(void *arg);
@@ -83,6 +84,8 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
         free(handle);
 		return NULL;
     }
+
+    handle->wtp_sta_hashmap = NULL;
 
     /* HDS parameters */
     handle->hds_inet_addr.sin_family = AF_INET;
@@ -226,6 +229,7 @@ void close_wtp(wtp_handle_t* handle) {
 	if (handle->send_thread) pthread_cancel(handle->send_thread);
 	if (handle->process_thread) pthread_cancel(handle->process_thread);
 	if (handle->udp_socket) close(handle->udp_socket);
+	if (handle->wtp_sta_hashmap) hashmapDelete(handle->wtp_sta_hashmap);
 
 	free(handle);
 }
@@ -606,18 +610,21 @@ void *send_msg_thread(void *arg)
 	wtp_handle_t* handle = (wtp_handle_t *) arg;
 	aslan_msg_t *msg = NULL;
 	uint8_t *buf = NULL;
+	u8 *mac;
 	int count, ret;
 
 	while (pipe_pop(handle->msg_send_consumer, &msg, 1))
 	{
 		buf = calloc(1, msg->msg_length);
 		if (!buf) break;
+		mac = NULL;
 		buf[0] = msg->msg_id;
 
 		switch (msg->msg_id)
 		{
 			case MSG_ID_CTX_REQ:
 				memcpy(buf + 1, msg->msg.ctx_req->MAC, 6);
+				mac = msg->msg.ctx_req->MAC;
 				break;
 		}
 
@@ -634,7 +641,7 @@ void *send_msg_thread(void *arg)
 			pthread_mutex_lock(&handle->ack_mutex);
 			count = handle->received_ack_count;
 			handle->received_ack_count = 0;
-			if ((count) && (handle->ack_last_flag == 1)) wtp_sta_set_reject(msg->msg.ctx_req->MAC[5]);
+			if ((count) && (mac) && (handle->ack_last_flag == 1)) wtp_sta_set_reject(mac);
 			pthread_mutex_unlock(&handle->ack_mutex);
 		}
 		free(buf);

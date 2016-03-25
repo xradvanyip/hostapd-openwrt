@@ -7,6 +7,7 @@
 
 #include "aslan_defs.h"
 #include "pipe.h"
+#include "hashmap.h"
 
 /*
  * Typedef
@@ -50,8 +51,7 @@ typedef struct wtp_handle_t_ {
     struct sockaddr_in hds_inet_addr;
 
     pthread_mutex_t sta_mutex;
-    char wtp_hashtable[256][10];
-    int wtp_hashcount[256];
+    hashmap* wtp_sta_hashmap;
 
     wtp_aslan_msg_cb msg_cb;
 } wtp_handle_t;
