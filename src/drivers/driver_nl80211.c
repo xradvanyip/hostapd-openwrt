@@ -3980,7 +3980,7 @@ static int nl80211_create_iface_once(struct wpa_driver_nl80211_data *drv,
 
 		flags = nla_nest_start(msg, NL80211_ATTR_MNTR_FLAGS);
 		if (!flags ||
-		    nla_put_flag(msg, NL80211_MNTR_FLAG_COOK_FRAMES))
+		    nla_put_flag(msg, NL80211_MNTR_FLAG_OTHER_BSS))
 			goto fail;
 
 		nla_nest_end(msg, flags);
