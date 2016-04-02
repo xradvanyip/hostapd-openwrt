@@ -10,8 +10,15 @@
 struct wtp_sta {
 	int mode;
 	int bss_id;
+	int rssi_sum;
+	int rssi_count;
 	u8 wtp_addr[6];
 	u8 wtp_bssid[6];
+};
+
+struct mon_node {
+	u8 sta_mac[6];
+	struct mon_node *next;
 };
 
 
@@ -24,6 +31,8 @@ void wtp_sta_set_ctx(u8* sta_mac, u8 *BSSID, int id);
 int wtp_sta_get_mode(struct wtp_sta *sta);
 void wtp_sta_set_mode(struct wtp_sta *sta, int sta_mode);
 int wtp_sta_bssid_cmp(struct wtp_sta *sta, u8* mac);
+
+void wtp_handle_monitor_frame(u8 *sa, const u8 *bssid, int rssi);
 
 int aslan_msg_cb(aslan_msg_t* msg);
 

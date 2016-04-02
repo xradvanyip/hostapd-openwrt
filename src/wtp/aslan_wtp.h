@@ -17,7 +17,6 @@ typedef int (*wtp_aslan_msg_cb)(aslan_msg_t* msg);
 
 typedef struct wtp_handle_t_ {
     int wtp_state;
-    pthread_mutex_t state_mutex;
 
     char device[IFNAMSIZ];
 
@@ -53,6 +52,9 @@ typedef struct wtp_handle_t_ {
     pthread_mutex_t sta_mutex;
     hashmap* wtp_sta_hashmap;
 
+	pthread_mutex_t monitor_mutex;
+	pthread_t monitor_thread;
+
     wtp_aslan_msg_cb msg_cb;
 } wtp_handle_t;
 
@@ -72,6 +74,7 @@ int wtp_stop_hello_thread(wtp_handle_t* handle);
 
 int wtp_send_hello_msg(wtp_handle_t* handle);
 int wtp_send_ctx_req(wtp_handle_t* handle, unsigned char MAC[6]);
+int wtp_send_sig_resp(wtp_handle_t* handle, unsigned char MAC[6], int8_t RSSI);
 int wtp_send_ack(wtp_handle_t* handle, uint8_t flag);
 
 inline int mac_cmp(char mac1[6], char mac2[6]);

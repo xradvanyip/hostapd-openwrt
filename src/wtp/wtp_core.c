@@ -1,3 +1,6 @@
+#include <pthread.h>
+#include <errno.h>
+#include <assert.h>
 #include "wtp_core.h"
 
 #include "ap/ap_config.h"
@@ -10,7 +13,10 @@
 const char* const chan_freq[] = { "2407", "2412", "2417", "2422", "2427", "2432", "2437", "2442", "2447", "2452", "2457", "2462", "2467", "2472", "2484" };
 wtp_handle_t *wtp_handle = NULL;
 struct hostapd_iface *wtp_hapdif;
+struct mon_node *mon_list = NULL;
 int wtp_used_bss[100] = {0};
+
+static void *monitor_thread_cb(void *arg);
 
 
 void wtp_init(wtp_handle_t *handle, struct hostapd_iface *hapdif)
@@ -20,6 +26,15 @@ void wtp_init(wtp_handle_t *handle, struct hostapd_iface *hapdif)
 
 	handle->wtp_sta_hashmap = hashmapCreate(0);
 	wtp_start_hello_thread(handle);
+
+	/* start thread for sending reports of signal level */
+    if (pthread_create(&(handle->monitor_thread), NULL, monitor_thread_cb, (void*)handle) != 0)
+    {
+        errno = ENOMEM;
+		close_wtp(handle);
+		return;
+    }
+	wpa_printf(MSG_INFO, "DEBUG: thread for sending RSSI reports created\n");
 }
 
 wtp_handle_t* wtp_get_handle()
@@ -37,6 +52,8 @@ struct wtp_sta* wtp_sta_get(u8* sta_mac)
 	{
 		hash_sta = os_calloc(1, sizeof(struct wtp_sta));
 		hash_sta->mode = WTP_STA_MODE_NONE;
+		hash_sta->rssi_sum = 0;
+		hash_sta->rssi_count = 0;
 		os_memcpy(hash_sta->wtp_addr, sta_mac, ETH_ALEN);
 		os_memset(hash_sta->wtp_bssid, 0, ETH_ALEN);
 		wpa_printf(MSG_INFO, "New STA in range: "MACSTR, MAC2STR(hash_sta->wtp_addr));
@@ -99,6 +116,77 @@ int wtp_sta_bssid_cmp(struct wtp_sta *sta, u8* mac)
 	pthread_mutex_unlock(&wtp_handle->sta_mutex);
 
 	return ret;
+}
+
+static int wtp_check_bssid_range(const u8 *mac)
+{
+	if ((mac[0] == 0x02) && (mac[1] == 0x00) && (mac[2] == 0x00) && (mac[3] == 0x00) && (mac[4] == 0x16))
+	{
+		return 1;
+	}
+
+	return 0;
+}
+
+void wtp_handle_monitor_frame(u8 *sa, const u8 *bssid, int rssi)
+{
+	struct wtp_sta *hash_sta;
+	struct mon_node *new_node;
+
+	if (!wtp_handle) return;
+	if (wtp_get_state(wtp_handle) == WTP_STATE_NONE) return;
+
+	hash_sta = wtp_sta_get(sa);
+	pthread_mutex_lock(&wtp_handle->monitor_mutex);
+	if ((wtp_check_bssid_range(bssid) == 1) || (wtp_sta_get_mode(hash_sta) == WTP_STA_MODE_CONNECTED))
+	{
+		pthread_mutex_lock(&wtp_handle->sta_mutex);
+		if (hash_sta->rssi_count == 0)
+		{
+			new_node = (struct mon_node *) os_malloc(sizeof(struct mon_node));
+			os_memcpy(new_node->sta_mac, sa, ETH_ALEN);
+			new_node->next = mon_list;
+			mon_list = new_node;
+		}
+		hash_sta->rssi_sum += rssi;
+		hash_sta->rssi_count++;
+		pthread_mutex_unlock(&wtp_handle->sta_mutex);
+	}
+	pthread_mutex_unlock(&wtp_handle->monitor_mutex);
+}
+
+void *monitor_thread_cb(void *arg)
+{
+	assert(arg);
+	wtp_handle_t* handle = (wtp_handle_t *) arg;
+	struct mon_node *curr_node;
+	struct wtp_sta *hash_sta;
+
+	while (1)
+	{
+		sleep(SIGNAL_RESP_INTERVAL);
+		pthread_mutex_lock(&wtp_handle->monitor_mutex);
+		while (mon_list)
+		{
+			curr_node = mon_list;
+			mon_list = mon_list->next;
+
+			pthread_mutex_lock(&wtp_handle->sta_mutex);
+			hash_sta = (struct wtp_sta *) hashmapGet(wtp_handle->wtp_sta_hashmap, *((unsigned long *) curr_node->sta_mac));
+			if (hash_sta)
+			{
+				wtp_send_sig_resp(handle, (unsigned char *) hash_sta->wtp_addr, hash_sta->rssi_sum / hash_sta->rssi_count);
+				hash_sta->rssi_sum = 0;
+				hash_sta->rssi_count = 0;
+			}
+			pthread_mutex_unlock(&wtp_handle->sta_mutex);
+			os_free(curr_node);
+		}
+		pthread_mutex_unlock(&wtp_handle->monitor_mutex);
+	}
+
+	pthread_exit(NULL);
+    return NULL;
 }
 
 static void wtp_ap_init(struct hostapd_data *hapd, u8 channel_num, char *SSID)

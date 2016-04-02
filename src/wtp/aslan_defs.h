@@ -6,6 +6,7 @@
 
 #define ASLAN_PROTOCOL_PORT    0x2016  //decimal: 8214
 #define WAIT_FOR_ACK_INTERVAL  2
+#define SIGNAL_RESP_INTERVAL   2
 #define BSS_CONF_FILE          "/tmp/aslan-bss.conf"
 
 /* WTP states */
@@ -73,7 +74,7 @@ typedef struct aslan_disassoc_resp_t_ {
 /* ASLAN Signal Response */
 typedef struct aslan_sig_resp_t_ {
 	unsigned char MAC[6];
-	uint8_t RSSI;
+	int8_t RSSI;
 } aslan_sig_resp_t;
 
 /* ASLAN Initialisation Response */

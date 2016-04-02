@@ -1,3 +1,4 @@
+#include <pthread.h>
 #include <errno.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
@@ -15,6 +16,8 @@
 #include "ap/ieee802_11.h"
 #include "wtp_core.h"
 #include "aslan_wtp.h"
+
+pthread_mutex_t state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static void *receive_msg_thread(void *arg);
 static void *process_msg_thread(void *arg);
@@ -61,12 +64,6 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
 		return NULL;
     }
 
-	if (pthread_mutex_init(&handle->state_mutex, NULL) != 0)
-    {
-        free(handle);
-		return NULL;
-    }
-
     if (pthread_mutex_init(&handle->udp_mutex, NULL) != 0)
     {
 		free(handle);
@@ -80,6 +77,12 @@ wtp_handle_t* wtp_alloc(const char* device, wtp_aslan_msg_cb msg_cb)
     }
 
 	if (pthread_mutex_init(&handle->sta_mutex, NULL) != 0)
+    {
+        free(handle);
+		return NULL;
+    }
+
+	if (pthread_mutex_init(&handle->monitor_mutex, NULL) != 0)
     {
         free(handle);
 		return NULL;
@@ -221,6 +224,7 @@ void close_wtp(wtp_handle_t* handle) {
     }
 
 	wtp_stop_hello_thread(handle);
+	if (handle->monitor_thread) pthread_cancel(handle->monitor_thread);
 	if (handle->receive_thread) pthread_cancel(handle->receive_thread);
 	if (handle->msg_send_producer) pipe_producer_free(handle->msg_send_producer);
 	if (handle->msg_send_consumer) pipe_consumer_free(handle->msg_send_consumer);
@@ -238,18 +242,18 @@ int wtp_get_state(wtp_handle_t* handle)
 {
 	int state;
 
-	pthread_mutex_lock(&handle->state_mutex);
+	pthread_mutex_lock(&state_mutex);
 	state = handle->wtp_state;
-	pthread_mutex_unlock(&handle->state_mutex);
+	pthread_mutex_unlock(&state_mutex);
 
 	return state;
 }
 
 void wtp_set_state(wtp_handle_t* handle, int state)
 {
-	pthread_mutex_lock(&handle->state_mutex);
+	pthread_mutex_lock(&state_mutex);
 	handle->wtp_state = state;
-	pthread_mutex_unlock(&handle->state_mutex);
+	pthread_mutex_unlock(&state_mutex);
 }
 
 int parse_msg(unsigned char *buf, int length, aslan_msg_t *msg)
@@ -689,6 +693,23 @@ int wtp_send_ctx_req(wtp_handle_t* handle, unsigned char MAC[6])
 	pipe_push(handle->msg_send_producer, &msg, 1);
 
 	return 0;
+}
+
+int wtp_send_sig_resp(wtp_handle_t* handle, unsigned char MAC[6], int8_t RSSI)
+{
+	int ret;
+    uint8_t buf[MSG_LENGTH_SIG_RESP];
+
+	if (udp_lock(handle) != 0) return -1;
+
+	buf[0] = MSG_ID_SIG_RESP;
+	memcpy(buf + 1, MAC, 6);
+	buf[7] = RSSI;
+    ret = sendto(handle->udp_socket, buf, MSG_LENGTH_SIG_RESP, 0, (struct sockaddr *) &handle->hds_inet_addr, sizeof(handle->hds_inet_addr));
+
+	if (udp_unlock(handle) != 0) return -1;
+
+	return ret;
 }
 
 int wtp_send_ack(wtp_handle_t* handle, uint8_t flag)

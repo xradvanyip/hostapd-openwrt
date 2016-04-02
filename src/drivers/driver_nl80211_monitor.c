@@ -21,6 +21,7 @@
 #include "linux_ioctl.h"
 #include "radiotap_iter.h"
 #include "driver_nl80211.h"
+#include "wtp/wtp_core.h"
 
 
 static void handle_tx_callback(void *ctx, u8 *buf, size_t len, int ok)
@@ -74,6 +75,8 @@ static void handle_frame(struct wpa_driver_nl80211_data *drv,
 	hdr = (struct ieee80211_hdr *) buf;
 	fc = le_to_host16(hdr->frame_control);
 
+	wtp_handle_monitor_frame(hdr->addr2, get_hdr_bssid(hdr, len), ssi_signal);
+
 	switch (WLAN_FC_GET_TYPE(fc)) {
 	case WLAN_FC_TYPE_MGMT:
 		os_memset(&event, 0, sizeof(event));
@@ -83,6 +86,7 @@ static void handle_frame(struct wpa_driver_nl80211_data *drv,
 		event.rx_mgmt.ssi_signal = ssi_signal;
 		wpa_supplicant_event(drv->ctx, EVENT_RX_MGMT, &event);
 		break;
+#if 0
 	case WLAN_FC_TYPE_CTRL:
 		/* can only get here with PS-Poll frames */
 		wpa_printf(MSG_DEBUG, "CTRL");
@@ -91,6 +95,7 @@ static void handle_frame(struct wpa_driver_nl80211_data *drv,
 	case WLAN_FC_TYPE_DATA:
 		from_unknown_sta(drv, buf, len);
 		break;
+#endif
 	}
 }
 

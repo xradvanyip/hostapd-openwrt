@@ -2248,7 +2248,6 @@ int ieee802_11_mgmt(struct hostapd_data *hapd, const u8 *buf, size_t len,
 	if (!wtp_handle) return 1;
 	if (wtp_get_state(wtp_handle) == WTP_STATE_NONE) return 1;
 
-	//...send stats...
 	hash_sta = wtp_sta_get(mgmt->sa);
 	if (stype == WLAN_FC_STYPE_PROBE_REQ)
 	{
