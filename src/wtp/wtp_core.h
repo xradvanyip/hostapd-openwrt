@@ -28,6 +28,7 @@ wtp_handle_t* wtp_get_handle();
 struct wtp_sta* wtp_sta_get(u8* sta_mac);
 void wtp_sta_set_reject(u8* sta_mac);
 void wtp_sta_set_ctx(u8* sta_mac, u8 *BSSID, int id);
+int wtp_sta_has_ctx(u8* sta_mac);
 int wtp_sta_get_mode(struct wtp_sta *sta);
 void wtp_sta_set_mode(struct wtp_sta *sta, int sta_mode);
 int wtp_sta_bssid_cmp(struct wtp_sta *sta, u8* mac);

@@ -91,6 +91,22 @@ void wtp_sta_set_ctx(u8* sta_mac, u8 *BSSID, int id)
 	pthread_mutex_unlock(&wtp_handle->sta_mutex);
 }
 
+int wtp_sta_has_ctx(u8* sta_mac)
+{
+	struct wtp_sta *hash_sta;
+	int ret = 0;
+
+	pthread_mutex_lock(&wtp_handle->sta_mutex);
+	hash_sta = (struct wtp_sta *) hashmapGet(wtp_handle->wtp_sta_hashmap, *((unsigned long *) sta_mac));
+	if (hash_sta)
+	{
+		if ((hash_sta->mode == WTP_STA_MODE_CTX) || (hash_sta->mode == WTP_STA_MODE_CONNECTED)) ret = 1;
+	}
+	pthread_mutex_unlock(&wtp_handle->sta_mutex);
+
+	return ret;
+}
+
 int wtp_sta_get_mode(struct wtp_sta *sta)
 {
 	int sta_mode;
@@ -226,10 +242,21 @@ static int wtp_vif_create(struct hostapd_iface *hapdif, u8 *BSSID, u8 *MAC)
 	struct sta_info *sta = NULL;
 	int i, j, ret;
 
+	if (wtp_sta_has_ctx(MAC)) return -1;
+
 	bss_conf = fopen(BSS_CONF_FILE, "w");
 	if (!bss_conf) return -1;
 
 	pthread_mutex_lock(&eloop_lock_mutex);
+	for (j=0; j < hapdif->num_bss; j++)
+	{
+		if (hostapd_mac_comp(hapdif->bss[j]->conf->bssid, BSSID) == 0)
+		{
+			pthread_mutex_unlock(&eloop_lock_mutex);
+			return -1;
+		}
+	}
+
 	os_snprintf(arg_buf, 50, "bss_config=%s:%s", hapdif->phy, BSS_CONF_FILE);
 	for (i=1; i < 100; i++) if (wtp_used_bss[i] == 0) break;
 
@@ -261,17 +288,22 @@ static int wtp_vif_create(struct hostapd_iface *hapdif, u8 *BSSID, u8 *MAC)
 
 	pthread_mutex_lock(&eloop_lock_mutex);
 	wtp_used_bss[i] = 1;
+	ret = -1;
 	for (j=0; j < hapdif->num_bss; j++)
 	{
-		if (hostapd_mac_comp(hapdif->bss[j]->conf->bssid, BSSID) == 0) break;
+		if (hostapd_mac_comp(hapdif->bss[j]->conf->bssid, BSSID) == 0)
+		{
+			ret = j;
+			break;
+		}
 	}
 
-	if (j != 0)
+	if (ret > 0)
 	{
-		sta = ap_sta_add(hapdif->bss[j], MAC);
+		sta = ap_sta_add(hapdif->bss[ret], MAC);
 		if (sta)
 		{
-			wpa_printf(MSG_INFO, "Added STA "MACSTR" with BSS struct id: %d\n", MAC2STR(sta->addr), j);
+			wpa_printf(MSG_INFO, "Added STA "MACSTR" with BSS struct id: %d\n", MAC2STR(sta->addr), ret);
 			ret = i;
 		}
 	}
