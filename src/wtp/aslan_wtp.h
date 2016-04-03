@@ -74,6 +74,7 @@ int wtp_stop_hello_thread(wtp_handle_t* handle);
 
 int wtp_send_hello_msg(wtp_handle_t* handle);
 int wtp_send_ctx_req(wtp_handle_t* handle, unsigned char MAC[6]);
+int wtp_send_assoc_resp(wtp_handle_t* handle, unsigned char MAC[6], void* sta_wtp_ctx, uint16_t ctx_length);
 int wtp_send_sig_resp(wtp_handle_t* handle, unsigned char MAC[6], int8_t RSSI);
 int wtp_send_ack(wtp_handle_t* handle, uint8_t flag);
 

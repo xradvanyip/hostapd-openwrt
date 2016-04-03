@@ -614,6 +614,7 @@ void *send_msg_thread(void *arg)
 	wtp_handle_t* handle = (wtp_handle_t *) arg;
 	aslan_msg_t *msg = NULL;
 	uint8_t *buf = NULL;
+	uint16_t length_ns;
 	u8 *mac;
 	int count, ret;
 
@@ -629,6 +630,13 @@ void *send_msg_thread(void *arg)
 			case MSG_ID_CTX_REQ:
 				memcpy(buf + 1, msg->msg.ctx_req->MAC, 6);
 				mac = msg->msg.ctx_req->MAC;
+				break;
+
+			case MSG_ID_ASSOC_RESP:
+				memcpy(buf + 1, msg->msg.assoc_resp->MAC, 6);
+				length_ns = htons(msg->msg.assoc_resp->sta_wtp_ctx_length);
+				memcpy(buf + 7, &length_ns, 2);
+				memcpy(buf + 9, msg->msg.assoc_resp->sta_wtp_ctx, msg->msg.assoc_resp->sta_wtp_ctx_length);
 				break;
 		}
 
@@ -689,6 +697,44 @@ int wtp_send_ctx_req(wtp_handle_t* handle, unsigned char MAC[6])
 	msg->msg.ctx_req = calloc(1, sizeof(aslan_ctx_req_t));
 	if (!msg->msg.ctx_req) return -1;
 	memcpy(msg->msg.ctx_req->MAC, MAC, 6);
+
+	pipe_push(handle->msg_send_producer, &msg, 1);
+
+	return 0;
+}
+
+int wtp_send_assoc_resp(wtp_handle_t* handle, unsigned char MAC[6], void* sta_wtp_ctx, uint16_t ctx_length)
+{
+	if (ctx_length > (MSG_LENGTH_ASSOC_RESP - 9)) return -1;
+
+	aslan_msg_t *msg = calloc(1, sizeof(aslan_msg_t));
+	if (!msg)
+	{
+		errno = ENOMEM;
+		perror("ASLAN message send error");
+		return -1;
+	}
+
+	msg->sender_ip = handle->local_ip;
+	msg->sender_port = handle->local_port;
+	msg->msg_id = MSG_ID_ASSOC_RESP;
+	msg->msg_length = MSG_LENGTH_ASSOC_RESP;
+
+	msg->msg.assoc_resp = calloc(1, sizeof(aslan_assoc_resp_t));
+	if (!msg->msg.assoc_resp)
+	{
+		free_msg(&msg);
+		return -1;
+	}
+	memcpy(msg->msg.assoc_resp->MAC, MAC, 6);
+	msg->msg.assoc_resp->sta_wtp_ctx = malloc(ctx_length);
+	if (!msg->msg.assoc_resp->sta_wtp_ctx)
+	{
+		free_msg(&msg);
+		return -1;
+	}
+	memcpy(msg->msg.assoc_resp->sta_wtp_ctx, sta_wtp_ctx, ctx_length);
+	msg->msg.assoc_resp->sta_wtp_ctx_length = ctx_length;
 
 	pipe_push(handle->msg_send_producer, &msg, 1);
 

@@ -1702,6 +1702,7 @@ static void handle_assoc(struct hostapd_data *hapd,
 	const u8 *pos;
 	int left, i;
 	struct sta_info *sta;
+	wtp_handle_t *wtp_handle = wtp_get_handle();
 
 	if (len < IEEE80211_HDRLEN + (reassoc ? sizeof(mgmt->u.reassoc_req) :
 				      sizeof(mgmt->u.assoc_req))) {
@@ -1873,6 +1874,8 @@ static void handle_assoc(struct hostapd_data *hapd,
 	/* Station will be marked associated, after it acknowledges AssocResp
 	 */
 	sta->flags |= WLAN_STA_ASSOC_REQ_OK;
+
+	wtp_send_assoc_resp(wtp_handle, sta->addr, (void *) mgmt, (uint16_t) len);
 
 #ifdef CONFIG_IEEE80211W
 	if ((sta->flags & WLAN_STA_MFP) && sta->sa_query_timed_out) {
