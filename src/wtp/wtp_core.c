@@ -7,10 +7,12 @@
 #include "ap/ieee802_11.h"
 #include "ap/sta_info.h"
 #include "ap/ap_drv_ops.h"
+#include "utils/eloop.h"
 #include "../hostapd/config_file.h"
 #include "../hostapd/ctrl_iface.h"
 
 const char* const chan_freq[] = { "2407", "2412", "2417", "2422", "2427", "2432", "2437", "2442", "2447", "2452", "2457", "2462", "2467", "2472", "2484" };
+pthread_mutex_t eloop_lock_mutex = PTHREAD_MUTEX_INITIALIZER;
 wtp_handle_t *wtp_handle = NULL;
 struct hostapd_iface *wtp_hapdif;
 struct mon_node *mon_list = NULL;
@@ -195,11 +197,22 @@ static void wtp_ap_init(struct hostapd_data *hapd, u8 channel_num, char *SSID)
 
 	os_snprintf(arg_buf, 10, "0 %s ht", chan_freq[channel_num]);
 
+	pthread_mutex_lock(&eloop_lock_mutex);
 	hostapd_set_iface(hapd->iconf, hapd->conf, "ssid", SSID);
+	pthread_mutex_unlock(&eloop_lock_mutex);
+
+	pthread_mutex_lock(&eloop_lock_mutex);
 	hostapd_set_iface(hapd->iconf, hapd->conf, "ignore_broadcast_ssid", "0");
+	pthread_mutex_unlock(&eloop_lock_mutex);
+
+	pthread_mutex_lock(&eloop_lock_mutex);
 	hostapd_reload_iface(hapd->iface);
+	pthread_mutex_unlock(&eloop_lock_mutex);
 	sleep(1);
+
+	pthread_mutex_lock(&eloop_lock_mutex);
 	hostapd_ctrl_iface_chan_switch(hapd->iface, arg_buf);
+	pthread_mutex_unlock(&eloop_lock_mutex);
 	sleep(1);
 
 	wtp_set_state(wtp_handle, WTP_STATE_INITIALISED);
@@ -211,11 +224,12 @@ static int wtp_vif_create(struct hostapd_iface *hapdif, u8 *BSSID, u8 *MAC)
 	FILE *bss_conf;
 	char arg_buf[50];
 	struct sta_info *sta = NULL;
-	int i, j;
+	int i, j, ret;
 
 	bss_conf = fopen(BSS_CONF_FILE, "w");
 	if (!bss_conf) return -1;
 
+	pthread_mutex_lock(&eloop_lock_mutex);
 	os_snprintf(arg_buf, 50, "bss_config=%s:%s", hapdif->phy, BSS_CONF_FILE);
 	for (i=1; i < 100; i++) if (wtp_used_bss[i] == 0) break;
 
@@ -242,8 +256,10 @@ static int wtp_vif_create(struct hostapd_iface *hapdif, u8 *BSSID, u8 *MAC)
 	fprintf(bss_conf, "bssid="MACSTR"\n", MAC2STR(BSSID));
 	fclose(bss_conf);
 	hostapd_add_iface(hapdif->interfaces, arg_buf);
+	pthread_mutex_unlock(&eloop_lock_mutex);
 	sleep(1);
 
+	pthread_mutex_lock(&eloop_lock_mutex);
 	wtp_used_bss[i] = 1;
 	for (j=0; j < hapdif->num_bss; j++)
 	{
@@ -256,11 +272,25 @@ static int wtp_vif_create(struct hostapd_iface *hapdif, u8 *BSSID, u8 *MAC)
 		if (sta)
 		{
 			wpa_printf(MSG_INFO, "Added STA "MACSTR" with BSS struct id: %d\n", MAC2STR(sta->addr), j);
-			return i;
+			ret = i;
 		}
 	}
+	else ret = -1;
+	pthread_mutex_unlock(&eloop_lock_mutex);
 
-	return -1;
+	return ret;
+}
+
+void hapd_eloop_lock_init()
+{
+	pthread_mutex_lock(&eloop_lock_mutex);
+}
+
+void hapd_eloop_lock_cb(void *eloop_data, void *user_data)
+{
+	pthread_mutex_unlock(&eloop_lock_mutex);
+	pthread_mutex_lock(&eloop_lock_mutex);
+	eloop_register_timeout(0, 1000, hapd_eloop_lock_cb, NULL, NULL);
 }
 
 int aslan_msg_cb(aslan_msg_t* msg)

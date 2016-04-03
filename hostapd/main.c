@@ -738,6 +738,8 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 	wtp_init(wtp_handle, interfaces.iface[0]);
+	hapd_eloop_lock_init();
+	eloop_register_timeout(0, 1000, hapd_eloop_lock_cb, NULL, NULL);
 
 	if (hostapd_global_run(&interfaces, daemonize, pid_file)) {
 		wpa_printf(MSG_ERROR, "Failed to start eloop");

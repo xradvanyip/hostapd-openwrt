@@ -34,6 +34,9 @@ int wtp_sta_bssid_cmp(struct wtp_sta *sta, u8* mac);
 
 void wtp_handle_monitor_frame(u8 *sa, const u8 *bssid, int rssi);
 
+void hapd_eloop_lock_init();
+void hapd_eloop_lock_cb(void *eloop_data, void *user_data);
+
 int aslan_msg_cb(aslan_msg_t* msg);
 
 #endif
