@@ -153,6 +153,8 @@ void wtp_handle_monitor_frame(u8 *sa, const u8 *bssid, int rssi)
 
 	if (!wtp_handle) return;
 	if (wtp_get_state(wtp_handle) == WTP_STATE_NONE) return;
+	if ((!sa) || (!bssid)) return;
+	if (hostapd_mac_comp(sa, bssid) == 0) return;
 
 	hash_sta = wtp_sta_get(sa);
 	pthread_mutex_lock(&wtp_handle->monitor_mutex);
