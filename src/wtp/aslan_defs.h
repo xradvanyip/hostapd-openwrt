@@ -117,7 +117,7 @@ typedef struct aslan_msg_t_ {
     in_addr_t sender_ip;
     in_port_t sender_port;
     uint8_t msg_id;
-	uint8_t msg_length;
+	uint16_t msg_length;
     union {
         aslan_hello_t *hello;
 		aslan_ctx_req_t *ctx_req;
