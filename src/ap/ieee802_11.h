@@ -40,6 +40,9 @@ static inline int ieee802_11_get_mib_sta(struct hostapd_data *hapd,
 	return 0;
 }
 #endif /* NEED_AP_MLME */
+
+int wtp_handle_auth(struct hostapd_data *hapd, const struct ieee80211_mgmt *mgmt, size_t len);
+
 u16 hostapd_own_capab_info(struct hostapd_data *hapd, struct sta_info *sta,
 			   int probe);
 void ap_ht2040_timeout(void *eloop_data, void *user_data);

@@ -42,6 +42,9 @@
 #include "dfs.h"
 #include "wtp/wtp_core.h"
 
+static int wtp_handle_assoc(struct hostapd_data *hapd, const struct ieee80211_mgmt *mgmt, size_t len);
+static int wtp_handle_assoc_cb(struct hostapd_data *hapd, u8 *sta_mac);
+
 
 u8 * hostapd_eid_supp_rates(struct hostapd_data *hapd, u8 *eid)
 {
@@ -1148,6 +1151,75 @@ static void handle_auth(struct hostapd_data *hapd,
 }
 
 
+int wtp_handle_auth(struct hostapd_data *hapd,
+			const struct ieee80211_mgmt *mgmt, size_t len)
+{
+	u16 auth_alg = WLAN_AUTH_OPEN;
+	u16 auth_transaction = 1;
+	u16 status_code = WLAN_STATUS_SUCCESS;
+	u16 fc = le_to_host16(mgmt->frame_control);
+	struct sta_info *sta = NULL;
+	struct hostapd_sta_wpa_psk_short *psk = NULL;
+
+	wpa_printf(MSG_DEBUG, "authentication(handover): STA=" MACSTR " auth_alg=%d "
+		   "auth_transaction=%d status_code=%d wep=%d",
+		   MAC2STR(mgmt->sa), auth_alg, auth_transaction,
+		   status_code, !!(fc & WLAN_FC_ISWEP));
+
+	if (hapd->tkip_countermeasures) {
+		wpa_printf(MSG_INFO, "authentication(handover): WLAN_REASON_MICHAEL_MIC_FAILURE");
+		return -1;
+	}
+
+	if (!(hapd->conf->auth_algs & WPA_AUTH_ALG_OPEN)) {
+		wpa_printf(MSG_INFO, "Unsupported authentication algorithm (%d)",
+			   auth_alg);
+		wpa_printf(MSG_INFO, "authentication(handover): WLAN_STATUS_NOT_SUPPORTED_AUTH_ALG");
+		return -1;
+	}
+
+	if (os_memcmp(mgmt->sa, hapd->own_addr, ETH_ALEN) == 0) {
+		wpa_printf(MSG_INFO, "Station " MACSTR " not allowed to authenticate",
+			   MAC2STR(mgmt->sa));
+		wpa_printf(MSG_INFO, "authentication(handover): WLAN_STATUS_UNSPECIFIED_FAILURE");
+		return -1;
+	}
+
+	sta = ap_sta_add(hapd, mgmt->sa);
+	if (!sta) {
+		wpa_printf(MSG_INFO, "authentication(handover): WLAN_STATUS_AP_UNABLE_TO_HANDLE_NEW_STA");
+		return -1;
+	}
+	sta->last_subtype = WLAN_FC_STYPE_AUTH;
+
+	hostapd_free_psk_list(sta->psk);
+	if (hapd->conf->wpa_psk_radius != PSK_RADIUS_IGNORED) {
+		sta->psk = psk;
+		psk = NULL;
+	} else {
+		sta->psk = NULL;
+	}
+
+	sta->identity = NULL;
+	sta->radius_cui = NULL;
+
+	sta->flags &= ~WLAN_STA_PREAUTH;
+	ieee802_1x_notify_pre_auth(sta->eapol_sm, 0);
+
+	ap_sta_no_session_timeout(hapd, sta);
+
+	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_DEBUG,
+		       "authentication OK (open system, handover)");
+	sta->flags |= WLAN_STA_AUTH;
+	wpa_auth_sm_event(sta->wpa_sm, WPA_AUTH);
+	sta->auth_alg = WLAN_AUTH_OPEN;
+	mlme_authenticate_indication(hapd, sta);
+
+	return wtp_handle_assoc(hapd, mgmt, len);
+}
+
+
 static int hostapd_get_aid(struct hostapd_data *hapd, struct sta_info *sta)
 {
 	int i, j = 32, aid;
@@ -1899,6 +1971,133 @@ static void handle_assoc(struct hostapd_data *hapd,
 }
 
 
+int wtp_handle_assoc(struct hostapd_data *hapd,
+			 const struct ieee80211_mgmt *mgmt, size_t len)
+{
+	u16 capab_info, listen_interval, seq_ctrl, fc;
+	const u8 *pos;
+	int left, i;
+	struct sta_info *sta;
+
+	if (len < IEEE80211_HDRLEN + sizeof(mgmt->u.assoc_req)) {
+		wpa_printf(MSG_INFO, "handle_assoc(handover) - too short payload (len=%lu)", (unsigned long) len);
+		return -1;
+	}
+
+	fc = le_to_host16(mgmt->frame_control);
+	seq_ctrl = le_to_host16(mgmt->seq_ctrl);
+
+	capab_info = le_to_host16(mgmt->u.assoc_req.capab_info);
+	listen_interval = le_to_host16(
+		mgmt->u.assoc_req.listen_interval);
+	wpa_printf(MSG_DEBUG, "association request(handover): STA=" MACSTR
+		   " capab_info=0x%02x listen_interval=%d "
+		   "seq_ctrl=0x%x%s",
+		   MAC2STR(mgmt->sa), capab_info, listen_interval,
+		   seq_ctrl, (fc & WLAN_FC_RETRY) ? " retry" : "");
+	left = len - (IEEE80211_HDRLEN + sizeof(mgmt->u.assoc_req));
+	pos = mgmt->u.assoc_req.variable;
+
+	sta = ap_get_sta(hapd, mgmt->sa);
+
+	sta->last_seq_ctrl = seq_ctrl;
+	sta->last_subtype = WLAN_FC_STYPE_ASSOC_REQ;
+
+	if (listen_interval > hapd->conf->max_listen_interval) {
+		hostapd_logger(hapd, mgmt->sa, HOSTAPD_MODULE_IEEE80211,
+			       HOSTAPD_LEVEL_DEBUG,
+			       "Too large Listen Interval (%d)",
+			       listen_interval);
+		wpa_printf(MSG_INFO, "association(handover): WLAN_STATUS_ASSOC_DENIED_LISTEN_INT_TOO_LARGE");
+		return -1;
+	}
+
+	/* followed by SSID and Supported rates; and HT capabilities if 802.11n
+	 * is used */
+	if (check_assoc_ies(hapd, sta, pos, left, 0) != WLAN_STATUS_SUCCESS)
+		return -1;
+
+	if (hostapd_get_aid(hapd, sta) < 0) {
+		hostapd_logger(hapd, mgmt->sa, HOSTAPD_MODULE_IEEE80211,
+			       HOSTAPD_LEVEL_INFO, "No room for more AIDs");
+		wpa_printf(MSG_INFO, "association(handover): WLAN_STATUS_AP_UNABLE_TO_HANDLE_NEW_STA");
+		return -1;
+	}
+
+	sta->capability = capab_info;
+	sta->listen_interval = listen_interval;
+
+	if (hapd->iface->current_mode->mode == HOSTAPD_MODE_IEEE80211G)
+		sta->flags |= WLAN_STA_NONERP;
+	for (i = 0; i < sta->supported_rates_len; i++) {
+		if ((sta->supported_rates[i] & 0x7f) > 22) {
+			sta->flags &= ~WLAN_STA_NONERP;
+			break;
+		}
+	}
+	if (sta->flags & WLAN_STA_NONERP && !sta->nonerp_set) {
+		sta->nonerp_set = 1;
+		hapd->iface->num_sta_non_erp++;
+		if (hapd->iface->num_sta_non_erp == 1)
+			ieee802_11_set_beacons(hapd->iface);
+	}
+
+	if (!(sta->capability & WLAN_CAPABILITY_SHORT_SLOT_TIME) &&
+	    !sta->no_short_slot_time_set) {
+		sta->no_short_slot_time_set = 1;
+		hapd->iface->num_sta_no_short_slot_time++;
+		if (hapd->iface->current_mode->mode ==
+		    HOSTAPD_MODE_IEEE80211G &&
+		    hapd->iface->num_sta_no_short_slot_time == 1)
+			ieee802_11_set_beacons(hapd->iface);
+	}
+
+	if (sta->capability & WLAN_CAPABILITY_SHORT_PREAMBLE)
+		sta->flags |= WLAN_STA_SHORT_PREAMBLE;
+	else
+		sta->flags &= ~WLAN_STA_SHORT_PREAMBLE;
+
+	if (!(sta->capability & WLAN_CAPABILITY_SHORT_PREAMBLE) &&
+	    !sta->no_short_preamble_set) {
+		sta->no_short_preamble_set = 1;
+		hapd->iface->num_sta_no_short_preamble++;
+		if (hapd->iface->current_mode->mode == HOSTAPD_MODE_IEEE80211G
+		    && hapd->iface->num_sta_no_short_preamble == 1)
+			ieee802_11_set_beacons(hapd->iface);
+	}
+
+#ifdef CONFIG_IEEE80211N
+	update_ht_state(hapd, sta);
+#endif /* CONFIG_IEEE80211N */
+
+	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_DEBUG,
+		       "association(handover) OK (aid %d)", sta->aid);
+	/* Station will be marked associated, after it acknowledges AssocResp
+	 */
+	sta->flags |= WLAN_STA_ASSOC_REQ_OK;
+
+#ifdef CONFIG_IEEE80211W
+	if ((sta->flags & WLAN_STA_MFP) && sta->sa_query_timed_out) {
+		wpa_printf(MSG_DEBUG, "Allowing association after timed out "
+			   "SA Query procedure");
+		/* TODO: Send a protected Disassociate frame to the STA using
+		 * the old key and Reason Code "Previous Authentication no
+		 * longer valid". Make sure this is only sent protected since
+		 * unprotected frame would be received by the STA that is now
+		 * trying to associate.
+		 */
+	}
+#endif /* CONFIG_IEEE80211W */
+
+	/* Make sure that the previously registered inactivity timer will not
+	 * remove the STA immediately. */
+	sta->timeout_next = STA_NULLFUNC;
+
+	return wtp_handle_assoc_cb(hapd, mgmt->sa);
+}
+
+
 static void handle_disassoc(struct hostapd_data *hapd,
 			    const struct ieee80211_mgmt *mgmt, size_t len)
 {
@@ -2525,6 +2724,92 @@ static void handle_assoc_cb(struct hostapd_data *hapd,
 	hapd->new_assoc_sta_cb(hapd, sta, !new_assoc);
 
 	ieee802_1x_notify_port_enabled(sta->eapol_sm, 1);
+}
+
+
+int wtp_handle_assoc_cb(struct hostapd_data *hapd, u8 *sta_mac)
+{
+	struct sta_info *sta;
+	struct ieee80211_ht_capabilities ht_cap;
+	struct ieee80211_vht_capabilities vht_cap;
+
+	sta = ap_get_sta(hapd, sta_mac);
+
+	/* Stop previous accounting session, if one is started, and allocate
+	 * new session id for the new session. */
+	accounting_sta_stop(hapd, sta);
+
+	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_INFO,
+		       "associated(handover) (aid %d)",
+		       sta->aid);
+
+	sta->flags |= WLAN_STA_ASSOC;
+	sta->flags &= ~WLAN_STA_WNM_SLEEP_MODE;
+	if (!hapd->conf->ieee802_1x && !hapd->conf->wpa && !hapd->conf->osen) {
+		/*
+		 * Open, static WEP, or FT protocol; no separate authorization
+		 * step.
+		 */
+		ap_sta_set_authorized(hapd, sta, 1);
+	}
+
+	mlme_associate_indication(hapd, sta);
+
+#ifdef CONFIG_IEEE80211W
+	sta->sa_query_timed_out = 0;
+#endif /* CONFIG_IEEE80211W */
+
+	/*
+	 * Remove the STA entry in order to make sure the STA PS state gets
+	 * cleared and configuration gets updated in case of reassociation back
+	 * to the same AP.
+	 */
+	hostapd_drv_sta_remove(hapd, sta->addr);
+
+#ifdef CONFIG_IEEE80211N
+	if (sta->flags & WLAN_STA_HT)
+		hostapd_get_ht_capab(hapd, sta->ht_capabilities, &ht_cap);
+#endif /* CONFIG_IEEE80211N */
+#ifdef CONFIG_IEEE80211AC
+	if (sta->flags & WLAN_STA_VHT)
+		hostapd_get_vht_capab(hapd, sta->vht_capabilities, &vht_cap);
+#endif /* CONFIG_IEEE80211AC */
+
+	if (hostapd_sta_add(hapd, sta->addr, sta->aid, sta->capability,
+			    sta->supported_rates, sta->supported_rates_len,
+			    sta->listen_interval,
+			    sta->flags & WLAN_STA_HT ? &ht_cap : NULL,
+			    sta->flags & WLAN_STA_VHT ? &vht_cap : NULL,
+			    sta->flags, sta->qosinfo, sta->vht_opmode)) {
+		hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
+			       HOSTAPD_LEVEL_NOTICE,
+			       "Could not add STA to kernel driver (handover)");
+
+		ap_sta_disconnect(hapd, sta, sta->addr,
+				  WLAN_REASON_DISASSOC_AP_BUSY);
+
+		return -1;
+	}
+
+	if (sta->flags & WLAN_STA_WDS) {
+		int ret;
+		char ifname_wds[IFNAMSIZ + 1];
+
+		ret = hostapd_set_wds_sta(hapd, ifname_wds, sta->addr,
+					  sta->aid, 1);
+		if (!ret)
+			hostapd_set_wds_encryption(hapd, sta, ifname_wds);
+	}
+
+	hostapd_set_sta_flags(hapd, sta);
+
+	wpa_auth_sm_event(sta->wpa_sm, WPA_ASSOC);
+	hapd->new_assoc_sta_cb(hapd, sta, 0);
+
+	ieee802_1x_notify_port_enabled(sta->eapol_sm, 1);
+
+	return 0;
 }
 
 

@@ -236,30 +236,27 @@ static void wtp_ap_init(struct hostapd_data *hapd, u8 channel_num, char *SSID)
 	wtp_set_state(wtp_handle, WTP_STATE_INITIALISED);
 }
 
-static int wtp_vif_create(struct hostapd_iface *hapdif, u8 *BSSID, u8 *MAC)
+static int wtp_vif_create(u8 *BSSID, u8 *MAC)
 {
-	struct hostapd_data *hapd_main = hapdif->bss[0];
+	struct hostapd_data *hapd_main = wtp_hapdif->bss[0];
 	FILE *bss_conf;
 	char arg_buf[50];
-	struct sta_info *sta = NULL;
 	int i, j, ret;
 
-	if (wtp_sta_has_ctx(MAC)) return -1;
-
-	bss_conf = fopen(BSS_CONF_FILE, "w");
-	if (!bss_conf) return -1;
-
 	pthread_mutex_lock(&eloop_lock_mutex);
-	for (j=0; j < hapdif->num_bss; j++)
+	for (j=0; j < wtp_hapdif->num_bss; j++)
 	{
-		if (hostapd_mac_comp(hapdif->bss[j]->conf->bssid, BSSID) == 0)
+		if (hostapd_mac_comp(wtp_hapdif->bss[j]->conf->bssid, BSSID) == 0)
 		{
 			pthread_mutex_unlock(&eloop_lock_mutex);
 			return -1;
 		}
 	}
 
-	os_snprintf(arg_buf, 50, "bss_config=%s:%s", hapdif->phy, BSS_CONF_FILE);
+	bss_conf = fopen(BSS_CONF_FILE, "w");
+	if (!bss_conf) return -1;
+
+	os_snprintf(arg_buf, 50, "bss_config=%s:%s", wtp_hapdif->phy, BSS_CONF_FILE);
 	for (i=1; i < 100; i++) if (wtp_used_bss[i] == 0) break;
 
 	fprintf(bss_conf, "driver=nl80211\n");
@@ -284,35 +281,63 @@ static int wtp_vif_create(struct hostapd_iface *hapdif, u8 *BSSID, u8 *MAC)
 	fprintf(bss_conf, "bridge=%s\n", hapd_main->conf->bridge);
 	fprintf(bss_conf, "bssid="MACSTR"\n", MAC2STR(BSSID));
 	fclose(bss_conf);
-	hostapd_add_iface(hapdif->interfaces, arg_buf);
+	hostapd_add_iface(wtp_hapdif->interfaces, arg_buf);
 	pthread_mutex_unlock(&eloop_lock_mutex);
 	sleep(1);
 
 	pthread_mutex_lock(&eloop_lock_mutex);
 	wtp_used_bss[i] = 1;
 	ret = -1;
-	for (j=0; j < hapdif->num_bss; j++)
+	for (j=0; j < wtp_hapdif->num_bss; j++)
 	{
-		if (hostapd_mac_comp(hapdif->bss[j]->conf->bssid, BSSID) == 0)
+		if (hostapd_mac_comp(wtp_hapdif->bss[j]->conf->bssid, BSSID) == 0)
 		{
 			ret = j;
 			break;
 		}
 	}
-
-	if (ret > 0)
-	{
-		sta = ap_sta_add(hapdif->bss[ret], MAC);
-		if (sta)
-		{
-			wpa_printf(MSG_INFO, "Added STA "MACSTR" with BSS struct id: %d\n", MAC2STR(sta->addr), ret);
-			ret = i;
-		}
-	}
-	else ret = -1;
 	pthread_mutex_unlock(&eloop_lock_mutex);
+	wtp_sta_set_ctx(MAC, BSSID, i);
 
 	return ret;
+}
+
+static int wtp_handle_ctx_resp(u8 *BSSID, u8 *MAC)
+{
+	struct sta_info *sta = NULL;
+	int ret;
+
+	if (wtp_sta_has_ctx(MAC)) return -1;
+
+	ret = wtp_vif_create(BSSID, MAC);
+	if (ret <= 0) return -1;
+
+	pthread_mutex_lock(&eloop_lock_mutex);
+	sta = ap_sta_add(wtp_hapdif->bss[ret], MAC);
+	pthread_mutex_unlock(&eloop_lock_mutex);
+	if (!sta) return -1;
+
+	wpa_printf(MSG_INFO, "Added STA "MACSTR" with BSS struct id: %d\n", MAC2STR(sta->addr), ret);
+	return 0;
+}
+
+static int wtp_handle_handover(u8 *BSSID, u8 *MAC, void* ctx, u16 ctx_length)
+{
+	struct wtp_sta *hash_sta;
+	int ret;
+
+	hash_sta = wtp_sta_get(MAC);
+
+	ret = wtp_vif_create(BSSID, MAC);
+	if (ret <= 0) return -1;
+
+	pthread_mutex_lock(&eloop_lock_mutex);
+	ret = wtp_handle_auth(wtp_hapdif->bss[ret], (const struct ieee80211_mgmt *) ctx, ctx_length);
+	pthread_mutex_unlock(&eloop_lock_mutex);
+	if (ret < 0) return -1;
+
+	wtp_sta_set_mode(hash_sta, WTP_STA_MODE_CONNECTED);
+	return 0;
 }
 
 void hapd_eloop_lock_init()
@@ -330,7 +355,6 @@ void hapd_eloop_lock_cb(void *eloop_data, void *user_data)
 int aslan_msg_cb(aslan_msg_t* msg)
 {
 	struct hostapd_data *hapd_main = wtp_hapdif->bss[0];
-	int ret;
 
 	switch (msg->msg_id)
 	{
@@ -340,10 +364,17 @@ int aslan_msg_cb(aslan_msg_t* msg)
 			break;
 
 		case MSG_ID_CTX_RESP:
-			ret = wtp_vif_create(wtp_hapdif, msg->msg.ctx_resp->BSSID, msg->msg.ctx_resp->MAC);
-			if (ret != -1)
+			if (wtp_handle_ctx_resp(msg->msg.ctx_resp->BSSID, msg->msg.ctx_resp->MAC) != -1)
 			{
-				wtp_sta_set_ctx(msg->msg.ctx_resp->MAC, msg->msg.ctx_resp->BSSID, ret);
+				wtp_send_ack(wtp_handle, 0);
+			}
+			else wtp_send_ack(wtp_handle, 1);
+			break;
+
+		case MSG_ID_HAND_REQ:
+			if (wtp_handle_handover(msg->msg.hand_req->BSSID, msg->msg.hand_req->MAC,
+						msg->msg.hand_req->sta_wtp_ctx, msg->msg.hand_req->sta_wtp_ctx_length) != -1)
+			{
 				wtp_send_ack(wtp_handle, 0);
 			}
 			else wtp_send_ack(wtp_handle, 1);

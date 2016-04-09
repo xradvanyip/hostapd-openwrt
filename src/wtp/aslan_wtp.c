@@ -290,7 +290,7 @@ int parse_msg(unsigned char *buf, int length, aslan_msg_t *msg)
 			memcpy(msg->msg.hand_req->MAC, buf + 1, 6);
 			memcpy(msg->msg.hand_req->BSSID, buf + 7, 6);
 			msg->msg.hand_req->sta_wtp_ctx_length = ntohs(*((uint16_t*)(buf + 13)));
-			msg->msg.hand_req->sta_wtp_ctx = calloc(msg->msg.hand_req->sta_wtp_ctx_length, 1);
+			msg->msg.hand_req->sta_wtp_ctx = malloc(msg->msg.hand_req->sta_wtp_ctx_length);
 			if (!msg->msg.hand_req->sta_wtp_ctx) return -1;
 			memcpy(msg->msg.hand_req->sta_wtp_ctx, buf + 15, msg->msg.hand_req->sta_wtp_ctx_length);
 			break;
