@@ -638,6 +638,10 @@ void *send_msg_thread(void *arg)
 				memcpy(buf + 7, &length_ns, 2);
 				memcpy(buf + 9, msg->msg.assoc_resp->sta_wtp_ctx, msg->msg.assoc_resp->sta_wtp_ctx_length);
 				break;
+
+			case MSG_ID_DISASSOC_RESP:
+				memcpy(buf + 1, msg->msg.disassoc_resp->MAC, 6);
+				break;
 		}
 
 		count = 0;
@@ -695,7 +699,11 @@ int wtp_send_ctx_req(wtp_handle_t* handle, unsigned char MAC[6])
 	msg->msg_length = MSG_LENGTH_CTX_REQ;
 
 	msg->msg.ctx_req = calloc(1, sizeof(aslan_ctx_req_t));
-	if (!msg->msg.ctx_req) return -1;
+	if (!msg->msg.ctx_req)
+	{
+		free_msg(&msg);
+		return -1;
+	}
 	memcpy(msg->msg.ctx_req->MAC, MAC, 6);
 
 	pipe_push(handle->msg_send_producer, &msg, 1);
@@ -756,6 +764,34 @@ int wtp_send_sig_resp(wtp_handle_t* handle, unsigned char MAC[6], int8_t RSSI)
 	if (udp_unlock(handle) != 0) return -1;
 
 	return ret;
+}
+
+int wtp_send_disassoc_resp(wtp_handle_t* handle, unsigned char MAC[6])
+{
+	aslan_msg_t *msg = calloc(1, sizeof(aslan_msg_t));
+	if (!msg)
+	{
+		errno = ENOMEM;
+		perror("ASLAN message send error");
+		return -1;
+	}
+
+	msg->sender_ip = handle->local_ip;
+	msg->sender_port = handle->local_port;
+	msg->msg_id = MSG_ID_DISASSOC_RESP;
+	msg->msg_length = MSG_LENGTH_DISASSOC_RESP;
+
+	msg->msg.disassoc_resp = calloc(1, sizeof(aslan_disassoc_resp_t));
+	if (!msg->msg.disassoc_resp)
+	{
+		free_msg(&msg);
+		return -1;
+	}
+	memcpy(msg->msg.disassoc_resp->MAC, MAC, 6);
+
+	pipe_push(handle->msg_send_producer, &msg, 1);
+
+	return 0;
 }
 
 int wtp_send_ack(wtp_handle_t* handle, uint8_t flag)

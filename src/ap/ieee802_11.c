@@ -2154,6 +2154,7 @@ static void handle_deauth(struct hostapd_data *hapd,
 			  const struct ieee80211_mgmt *mgmt, size_t len)
 {
 	struct sta_info *sta;
+	wtp_handle_t *wtp_handle = wtp_get_handle();
 
 	if (len < IEEE80211_HDRLEN + sizeof(mgmt->u.deauth)) {
 		wpa_msg(hapd->msg_ctx, MSG_DEBUG, "handle_deauth - too short "
@@ -2184,6 +2185,9 @@ static void handle_deauth(struct hostapd_data *hapd,
 		hapd, sta, le_to_host16(mgmt->u.deauth.reason_code));
 	sta->acct_terminate_cause = RADIUS_ACCT_TERMINATE_CAUSE_USER_REQUEST;
 	ieee802_1x_notify_port_enabled(sta->eapol_sm, 0);
+
+	wtp_send_disassoc_resp(wtp_handle, sta->addr);
+
 	ap_free_sta(hapd, sta);
 }
 
