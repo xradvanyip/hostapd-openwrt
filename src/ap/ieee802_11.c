@@ -43,7 +43,7 @@
 #include "wtp/wtp_core.h"
 
 static int wtp_handle_assoc(struct hostapd_data *hapd, const struct ieee80211_mgmt *mgmt, size_t len);
-static int wtp_handle_assoc_cb(struct hostapd_data *hapd, u8 *sta_mac);
+static int wtp_handle_assoc_cb(struct hostapd_data *hapd, const u8 *sta_mac);
 
 
 u8 * hostapd_eid_supp_rates(struct hostapd_data *hapd, u8 *eid)
@@ -2188,6 +2188,28 @@ static void handle_deauth(struct hostapd_data *hapd,
 }
 
 
+void wtp_handle_deauth(struct hostapd_data *hapd, const u8 *sta_mac)
+{
+	struct sta_info *sta;
+
+	sta = ap_get_sta(hapd, sta_mac);
+	if (sta == NULL) return;
+
+	ap_sta_set_authorized(hapd, sta, 0);
+	sta->last_seq_ctrl = WLAN_INVALID_MGMT_SEQ;
+	sta->flags &= ~(WLAN_STA_AUTH | WLAN_STA_ASSOC |
+			WLAN_STA_ASSOC_REQ_OK);
+	wpa_auth_sm_event(sta->wpa_sm, WPA_DEAUTH);
+	hostapd_logger(hapd, sta->addr, HOSTAPD_MODULE_IEEE80211,
+		       HOSTAPD_LEVEL_DEBUG, "deauthenticated");
+	mlme_deauthenticate_indication(
+		hapd, sta, WLAN_REASON_DISASSOC_STA_HAS_LEFT);
+	sta->acct_terminate_cause = RADIUS_ACCT_TERMINATE_CAUSE_USER_REQUEST;
+	ieee802_1x_notify_port_enabled(sta->eapol_sm, 0);
+	ap_free_sta(hapd, sta);
+}
+
+
 static void handle_beacon(struct hostapd_data *hapd,
 			  const struct ieee80211_mgmt *mgmt, size_t len,
 			  struct hostapd_frame_info *fi)
@@ -2727,7 +2749,7 @@ static void handle_assoc_cb(struct hostapd_data *hapd,
 }
 
 
-int wtp_handle_assoc_cb(struct hostapd_data *hapd, u8 *sta_mac)
+int wtp_handle_assoc_cb(struct hostapd_data *hapd, const u8 *sta_mac)
 {
 	struct sta_info *sta;
 	struct ieee80211_ht_capabilities ht_cap;

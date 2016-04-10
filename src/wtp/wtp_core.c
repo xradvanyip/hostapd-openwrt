@@ -107,6 +107,27 @@ int wtp_sta_has_ctx(u8* sta_mac)
 	return ret;
 }
 
+static int wtp_sta_remove_ctx(u8* sta_mac)
+{
+	struct wtp_sta *hash_sta;
+	int ret = -1;
+
+	pthread_mutex_lock(&wtp_handle->sta_mutex);
+	hash_sta = (struct wtp_sta *) hashmapGet(wtp_handle->wtp_sta_hashmap, *((unsigned long *) sta_mac));
+	if ((hash_sta) && ((hash_sta->mode == WTP_STA_MODE_CTX) || (hash_sta->mode == WTP_STA_MODE_CONNECTED)))
+	{
+		if (hash_sta->mode == WTP_STA_MODE_CTX) hash_sta->mode = WTP_STA_MODE_NONE;
+		else hash_sta->mode = WTP_STA_MODE_REQ;
+		hash_sta->rssi_sum = 0;
+		hash_sta->rssi_count = 0;
+		os_memset(hash_sta->wtp_bssid, 0, ETH_ALEN);
+		ret = hash_sta->bss_id;
+	}
+	pthread_mutex_unlock(&wtp_handle->sta_mutex);
+
+	return ret;
+}
+
 int wtp_sta_get_mode(struct wtp_sta *sta)
 {
 	int sta_mode;
@@ -123,6 +144,22 @@ void wtp_sta_set_mode(struct wtp_sta *sta, int sta_mode)
 	pthread_mutex_lock(&wtp_handle->sta_mutex);
 	sta->mode = sta_mode;
 	pthread_mutex_unlock(&wtp_handle->sta_mutex);
+}
+
+static u8 *wtp_sta_get_bssid(u8* sta_mac)
+{
+	struct wtp_sta *hash_sta;
+	u8 *ret = NULL;
+
+	pthread_mutex_lock(&wtp_handle->sta_mutex);
+	hash_sta = (struct wtp_sta *) hashmapGet(wtp_handle->wtp_sta_hashmap, *((unsigned long *) sta_mac));
+	if ((hash_sta) && ((hash_sta->mode == WTP_STA_MODE_CTX) || (hash_sta->mode == WTP_STA_MODE_CONNECTED)))
+	{
+		ret = hash_sta->wtp_bssid;
+	}
+	pthread_mutex_unlock(&wtp_handle->sta_mutex);
+
+	return ret;
 }
 
 int wtp_sta_bssid_cmp(struct wtp_sta *sta, u8* mac)
@@ -193,7 +230,7 @@ void *monitor_thread_cb(void *arg)
 
 			pthread_mutex_lock(&wtp_handle->sta_mutex);
 			hash_sta = (struct wtp_sta *) hashmapGet(wtp_handle->wtp_sta_hashmap, *((unsigned long *) curr_node->sta_mac));
-			if (hash_sta)
+			if ((hash_sta) && (hash_sta->rssi_count))
 			{
 				wtp_send_sig_resp(handle, (unsigned char *) hash_sta->wtp_addr, hash_sta->rssi_sum / hash_sta->rssi_count);
 				hash_sta->rssi_sum = 0;
@@ -302,6 +339,24 @@ static int wtp_vif_create(u8 *BSSID, u8 *MAC)
 	return ret;
 }
 
+static int wtp_vif_remove(int bss_id)
+{
+	struct hostapd_data *hapd_main = wtp_hapdif->bss[0];
+	char arg_buf[10];
+	int ret;
+
+	if (!wtp_used_bss[bss_id]) return -1;
+
+	os_snprintf(arg_buf, 10, "%s-%d", hapd_main->conf->iface, bss_id);
+
+	pthread_mutex_lock(&eloop_lock_mutex);
+	ret = hostapd_remove_iface(wtp_hapdif->interfaces, arg_buf);
+	pthread_mutex_unlock(&eloop_lock_mutex);
+
+	wtp_used_bss[bss_id] = 0;
+	return ret;
+}
+
 static int wtp_handle_ctx_resp(u8 *BSSID, u8 *MAC)
 {
 	struct sta_info *sta = NULL;
@@ -340,6 +395,35 @@ static int wtp_handle_handover(u8 *BSSID, u8 *MAC, void* ctx, u16 ctx_length)
 	return 0;
 }
 
+static int wtp_handle_release(u8 *MAC)
+{
+	u8 *bssid;
+	int j, ret;
+
+	bssid = wtp_sta_get_bssid(MAC);
+	if (!bssid) return -1;
+
+	pthread_mutex_lock(&eloop_lock_mutex);
+	ret = -1;
+	for (j=0; j < wtp_hapdif->num_bss; j++)
+	{
+		if (hostapd_mac_comp(wtp_hapdif->bss[j]->conf->bssid, bssid) == 0)
+		{
+			ret = j;
+			break;
+		}
+	}
+	if (ret > 0) wtp_handle_deauth(wtp_hapdif->bss[ret],MAC);
+	pthread_mutex_unlock(&eloop_lock_mutex);
+
+	ret = wtp_sta_remove_ctx(MAC);
+	if (ret < 0) return -1;
+
+	ret = wtp_vif_remove(ret);
+
+	return ret;
+}
+
 void hapd_eloop_lock_init()
 {
 	pthread_mutex_lock(&eloop_lock_mutex);
@@ -374,6 +458,14 @@ int aslan_msg_cb(aslan_msg_t* msg)
 		case MSG_ID_HAND_REQ:
 			if (wtp_handle_handover(msg->msg.hand_req->BSSID, msg->msg.hand_req->MAC,
 						msg->msg.hand_req->sta_wtp_ctx, msg->msg.hand_req->sta_wtp_ctx_length) != -1)
+			{
+				wtp_send_ack(wtp_handle, 0);
+			}
+			else wtp_send_ack(wtp_handle, 1);
+			break;
+
+		case MSG_ID_REL_REQ:
+			if (wtp_handle_release(msg->msg.rel_req->MAC) != -1)
 			{
 				wtp_send_ack(wtp_handle, 0);
 			}

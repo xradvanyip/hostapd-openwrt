@@ -42,6 +42,7 @@ static inline int ieee802_11_get_mib_sta(struct hostapd_data *hapd,
 #endif /* NEED_AP_MLME */
 
 int wtp_handle_auth(struct hostapd_data *hapd, const struct ieee80211_mgmt *mgmt, size_t len);
+void wtp_handle_deauth(struct hostapd_data *hapd, const u8 *sta_mac);
 
 u16 hostapd_own_capab_info(struct hostapd_data *hapd, struct sta_info *sta,
 			   int probe);
