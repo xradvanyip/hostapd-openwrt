@@ -319,10 +319,7 @@ static int wtp_vif_create(u8 *BSSID, u8 *MAC)
 	fprintf(bss_conf, "bssid="MACSTR"\n", MAC2STR(BSSID));
 	fclose(bss_conf);
 	hostapd_add_iface(wtp_hapdif->interfaces, arg_buf);
-	pthread_mutex_unlock(&eloop_lock_mutex);
-	sleep(1);
 
-	pthread_mutex_lock(&eloop_lock_mutex);
 	wtp_used_bss[i] = 1;
 	ret = -1;
 	for (j=0; j < wtp_hapdif->num_bss; j++)
